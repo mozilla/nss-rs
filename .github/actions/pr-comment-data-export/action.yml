@@ -1,0 +1,41 @@
+name: 'Export data for PR comment'
+description: 'Exports the neccessary data to post a PR comment securely.'
+
+# This action might be running off of a fork and would thus not have write
+# permissions on the origin repository. In order to allow a separate
+# priviledged action to post a comment on a pull request, upload the
+# necessary metadata.
+
+inputs:
+  name:
+    description: 'A unique name for the artifact used for exporting.'
+    required: true
+  contents:
+    description: 'A filename with a comment (in Markdown) to be added to the PR.'
+    required: true
+  log-md:
+    description: 'A Markdown string to append to the PR comment.'
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - if: ${{ github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        CONTENTS: ${{ inputs.contents }}
+        NAME: ${{ inputs.name }}
+        LOG_MD: ${{ inputs.log-md }}
+        EVENT_NUMBER: ${{ github.event.number }}
+      run: |
+        mkdir comment-data
+        cp "$CONTENTS" comment-data/contents
+        echo "$NAME" > comment-data/name
+        echo "$EVENT_NUMBER" > comment-data/pr-number
+        echo "$LOG_MD" > comment-data/log-md
+    - if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.name }}
+        path: comment-data
+        retention-days: 1

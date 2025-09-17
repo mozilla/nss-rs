@@ -1,0 +1,72 @@
+name: Find mutants
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mutants:
+    name: Find mutants
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: nss-version
+        run: echo "minimum=$(cat min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - uses: ./.github/actions/rust
+        with:
+          tools: cargo-mutants
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find incremental mutants
+        id: mutants
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git diff "origin/$BASE_REF".. > pr.diff
+          set -o pipefail
+          cargo mutants --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
+          echo 'title=Incremental Mutants' >> "$GITHUB_OUTPUT"
+
+      - name: Find mutants
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -o pipefail
+          cargo mutants -vV --in-place | tee results.txt || true
+          echo 'title=All Mutants' >> "$GITHUB_OUTPUT"
+
+      - name: Post step summary
+        env:
+          TITLE: ${{ steps.mutants.outputs.title }}
+        run: |
+          {
+            echo "### $TITLE"
+            echo "See https://mutants.rs/using-results.html for more information."
+            echo '```'
+            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt || true
+            echo '```'
+          } > "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutants.out
+          path: mutants.out
