@@ -218,6 +218,7 @@ impl Default for TimeHolder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use std::{
         convert::{TryFrom as _, TryInto as _},

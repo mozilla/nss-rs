@@ -217,6 +217,7 @@ pub fn secstatus_to_res(code: SECStatus) -> Res<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use test_fixture::fixture_init;
 

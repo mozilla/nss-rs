@@ -1470,6 +1470,7 @@ impl From<Server> for Agent {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::ResumptionToken;
 

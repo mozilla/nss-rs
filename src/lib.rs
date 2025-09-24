@@ -15,6 +15,7 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_safety_doc)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 #[cfg(feature = "disable-encryption")]
 pub mod aead_null;
