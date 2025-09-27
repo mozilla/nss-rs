@@ -9,6 +9,7 @@ use std::{fmt::Write as _, io::Write as _, mem};
 use log::{info, trace};
 
 use crate::{
+    aead::AeadTrait as _,
     constants::{Cipher, Version},
     err::{Error, Res},
     hkdf,
@@ -93,7 +94,7 @@ impl SelfEncrypt {
         // AAD covers the entire header, plus the value of the AAD parameter that is provided.
         let salt = random::<{ Self::SALT_LENGTH }>();
         let cipher = self.make_aead(&self.key, &salt)?;
-        let encoded_len = 2 + salt.len() + plaintext.len() + Aead::expansion();
+        let encoded_len = 2 + salt.len() + plaintext.len() + cipher.expansion();
 
         let mut enc = Vec::<u8>::with_capacity(encoded_len);
         enc.write_all(&[Self::VERSION])
