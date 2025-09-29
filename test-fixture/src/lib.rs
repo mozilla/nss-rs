@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nss_gk_api::{init_db, AntiReplay};
+use nss_rs::{init_db, AntiReplay};
 
 /// The path for the database used in tests.
 ///

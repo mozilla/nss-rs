@@ -1,5 +1,5 @@
 [package]
-name = "nss-gk-api"
+name = "nss-rs"
 version = "0.3.0"
 authors = ["Martin Thomson <mt@lowentropy.net>", "Andy Leiserson <aleiserson@mozilla.com>", "John M. Schanck <jschanck@mozilla.com>", "Benjamin Beurdouche <beurdouche@mozilla.com>", "Anna Weine <anna.weine@mozilla.com>"]
 categories = ["network-programming", "web-programming"]
@@ -9,7 +9,7 @@ rust-version = "1.82.0"
 build = "build.rs"
 license = "MIT/Apache-2.0"
 description = "Gecko API for NSS"
-repository = "https://github.com/mozilla/nss-gk-api"
+repository = "https://github.com/mozilla/nss-rs"
 
 [dependencies]
 enum-map = { version = "2.7", default-features = false }

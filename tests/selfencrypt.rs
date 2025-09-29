@@ -7,7 +7,7 @@
 #![cfg(not(feature = "disable-encryption"))]
 #![cfg(test)]
 
-use nss_gk_api::{
+use nss_rs::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     init,
     selfencrypt::SelfEncrypt,

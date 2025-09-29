@@ -7,7 +7,7 @@
 #![warn(clippy::pedantic)]
 #![cfg(not(feature = "disable-encryption"))]
 
-use nss_gk_api::{
+use nss_rs::{
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf, Aead,
 };

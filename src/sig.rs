@@ -20,9 +20,8 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 // use crate::Result;
-use nss::{ec::Curve, ec::PublicKey};
-
-use nss_gk_api::HashAlgorithm;
+use nss::ec::{Curve, PublicKey};
+use nss_rs::HashAlgorithm;
 
 /// A signature verification algorithm.
 pub struct SignatureAlgorithm {
@@ -70,8 +69,9 @@ impl<'a> Signature<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    use super::*;
 
     #[test]
     fn test_ecdsa_p384_sha384_verify() {

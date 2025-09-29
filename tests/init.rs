@@ -4,18 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// This uses external interfaces to neqo_crypto rather than being a module
+// This uses external interfaces to nss-rs rather than being a module
 // inside of lib.rs. Because all other code uses the test_fixture module,
 // they will be calling into the public version of init_db().  Calling into
 // the version exposed to an inner module in lib.rs would result in calling
 // a different version of init_db.  That causes explosions as they get
 // different versions of the Once instance they use and they initialize NSS
 // twice, probably likely in parallel.  That doesn't work out well.
-use nss_gk_api::assert_initialized;
+use nss_rs::assert_initialized;
 #[cfg(nss_nodb)]
-use nss_gk_api::init;
+use nss_rs::init;
 #[cfg(not(nss_nodb))]
-use nss_gk_api::init_db;
+use nss_rs::init_db;
 
 // Pull in the NSS internals so that we can ask NSS if it thinks that
 // it is properly initialized.
@@ -25,14 +25,14 @@ use nss_gk_api::init_db;
     reason = "Code is bindgen-generated."
 )]
 mod nss {
-    use nss_gk_api::nss_prelude::*;
+    use nss_rs::nss_prelude::*;
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
 #[cfg(nss_nodb)]
 #[test]
 fn init_nodb() {
-    neqo_crypto::init().unwrap();
+    nss_rs::init().unwrap();
     assert_initialized();
     unsafe {
         assert_ne!(nss::NSS_IsInitialized(), 0);

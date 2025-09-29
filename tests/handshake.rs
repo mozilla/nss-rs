@@ -9,7 +9,7 @@
 use std::{mem, time::Instant};
 
 use log::info;
-use nss_gk_api::{
+use nss_rs::{
     AntiReplay, AuthenticationStatus, Client, HandshakeState, RecordList, Res, ResumptionToken,
     SecretAgent, Server, ZeroRttCheckResult, ZeroRttChecker,
 };

@@ -79,7 +79,7 @@ fn setup_clang() {
         PathBuf::from(dir.trim())
     } else {
         eprintln!("warning: Building without a gecko setup is not likely to work.");
-        eprintln!("         A working libclang is needed to build nss-gk-api.");
+        eprintln!("         A working libclang is needed to build nss-rs.");
         eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
         eprintln!();
         eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
@@ -366,7 +366,7 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
 
     assert!(
         version_req.matches(&modversion_for_cmp),
-        "neqo has NSS version requirement {version_req}, found {modversion}",
+        "nss-rs has NSS version requirement {version_req}, found {modversion}",
     );
 
     let cfg = Command::new("pkg-config")

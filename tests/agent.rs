@@ -3,7 +3,7 @@
 
 use std::ffi::CStr;
 
-use nss_gk_api::{
+use nss_rs::{
     agent::CertificateCompressor, generate_ech_keys, AuthenticationStatus, Client, Error,
     HandshakeState, Res, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
