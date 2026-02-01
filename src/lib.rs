@@ -79,6 +79,9 @@ pub use self::{
         KemId, SymmetricSuite,
     },
     err::{secstatus_to_res, Error, IntoResult, PRErrorCode, Res},
+    hash::{
+        hash, sha256, sha384, sha3_224, sha3_256, sha3_384, sha3_512, sha512, HashAlgorithm,
+    },
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     p11::{random, randomize, PrivateKey, PublicKey, SymKey},
     replay::AntiReplay,

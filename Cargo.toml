@@ -30,6 +30,7 @@ serde_derive = { version = "1.0", default-features = false }
 toml = { version = "0.5", default-features = false }
 
 [dev-dependencies]
+hex = "0.4"
 test-fixture = {path = "test-fixture"}
 
 [package.metadata.cargo-machete]
