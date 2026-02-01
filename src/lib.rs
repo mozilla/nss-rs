@@ -40,6 +40,7 @@ pub mod der;
 pub mod ec;
 pub mod hash;
 pub mod hmac;
+pub mod kem;
 pub mod p11;
 mod prio;
 mod replay;
@@ -80,6 +81,10 @@ pub use self::{
     },
     err::{secstatus_to_res, Error, IntoResult, PRErrorCode, Res},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    kem::{
+        decapsulate as kem_decapsulate, encapsulate as kem_encapsulate,
+        generate_keypair as kem_generate_keypair, MlKemKeypair, MlKemParameterSet,
+    },
     p11::{random, randomize, PrivateKey, PublicKey, SymKey},
     replay::AntiReplay,
     secrets::SecretDirection,
