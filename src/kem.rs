@@ -4,21 +4,98 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Key Encapsulation Mechanism (KEM) support for ML-KEM (FIPS 203).
+//! Key Encapsulation Mechanism (KEM) support.
 //!
-//! This module provides Rust bindings for NSS's ML-KEM implementation,
-//! supporting ML-KEM-768 and ML-KEM-1024 parameter sets.
+//! This module provides a unified interface for Key Encapsulation Mechanisms,
+//! supporting both classical post-quantum KEMs (ML-KEM per FIPS 203) and
+//! hybrid KEMs that combine post-quantum and classical algorithms.
+//!
+//! ## Supported KEMs
+//!
+//! - **ML-KEM-768**: Post-quantum KEM with 192-bit security level
+//! - **ML-KEM-1024**: Post-quantum KEM with 256-bit security level
+//! - **X-Wing (ML-KEM-768 + X25519)**: Hybrid KEM combining ML-KEM-768 + X25519
 
 use std::ptr::null_mut;
 
 use crate::{
-    err::{secstatus_to_res, IntoResult as _, Res},
+    err::{secstatus_to_res, Error, IntoResult as _, Res},
     init,
+    kem_combiners::{
+        xwing_decapsulate, xwing_encapsulate, XWingKeyPair, XWING_MLKEM768_X25519_CIPHERTEXT_SIZE,
+        XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE, XWING_MLKEM768_X25519_SECRET_KEY_SIZE, XWING_MLKEM768_X25519_SHARED_SECRET_SIZE,
+    },
     p11::{self, PrivateKey, PublicKey, Slot, SymKey},
     prtypes::PRUint32,
     util::SECItemBorrowed,
     ScopedSECItem, SECItem,
 };
+
+// ============================================================================
+// KEM Parameter Sets
+// ============================================================================
+
+/// KEM parameter sets for all supported algorithms.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KemParameterSet {
+    /// ML-KEM-768: Post-quantum KEM with 192-bit security level (FIPS 203)
+    MlKem768,
+    /// ML-KEM-1024: Post-quantum KEM with 256-bit security level (FIPS 203)
+    MlKem1024,
+    /// X-Wing (ML-KEM-768 + X25519): Hybrid KEM combining ML-KEM-768 + X25519
+    XWingMLKem768X25519,
+}
+
+impl KemParameterSet {
+    /// Returns the public key size in bytes.
+    #[must_use]
+    pub const fn public_key_bytes(self) -> usize {
+        match self {
+            Self::MlKem768 => 1184,
+            Self::MlKem1024 => 1568,
+            Self::XWingMLKem768X25519 => XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE,
+        }
+    }
+
+    /// Returns the private key size in bytes.
+    #[must_use]
+    pub const fn private_key_bytes(self) -> usize {
+        match self {
+            Self::MlKem768 => 2400,
+            Self::MlKem1024 => 3168,
+            Self::XWingMLKem768X25519 => XWING_MLKEM768_X25519_SECRET_KEY_SIZE,
+        }
+    }
+
+    /// Returns the ciphertext size in bytes.
+    #[must_use]
+    pub const fn ciphertext_bytes(self) -> usize {
+        match self {
+            Self::MlKem768 => 1088,
+            Self::MlKem1024 => 1568,
+            Self::XWingMLKem768X25519 => XWING_MLKEM768_X25519_CIPHERTEXT_SIZE,
+        }
+    }
+
+    /// Returns the shared secret size in bytes.
+    #[must_use]
+    pub const fn shared_secret_bytes(self) -> usize {
+        match self {
+            Self::MlKem768 | Self::MlKem1024 => 32,
+            Self::XWingMLKem768X25519 => XWING_MLKEM768_X25519_SHARED_SECRET_SIZE,
+        }
+    }
+
+    /// Returns true if this is a hybrid KEM.
+    #[must_use]
+    pub const fn is_hybrid(self) -> bool {
+        matches!(self, Self::XWingMLKem768X25519)
+    }
+}
+
+// ============================================================================
+// ML-KEM Parameter Set (for backwards compatibility and internal use)
+// ============================================================================
 
 /// ML-KEM parameter sets as defined in FIPS 203.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,31 +150,74 @@ impl MlKemParameterSet {
     }
 }
 
-/// An ML-KEM key pair.
+impl From<MlKemParameterSet> for KemParameterSet {
+    fn from(params: MlKemParameterSet) -> Self {
+        match params {
+            MlKemParameterSet::MlKem768 => Self::MlKem768,
+            MlKemParameterSet::MlKem1024 => Self::MlKem1024,
+        }
+    }
+}
+
+// ============================================================================
+// Key Pair Types
+// ============================================================================
+
+/// An ML-KEM key pair (for internal use and backwards compatibility).
 pub struct MlKemKeypair {
     pub public: PublicKey,
     pub private: PrivateKey,
 }
 
+/// A unified KEM key pair that can hold any supported KEM type.
+pub enum KemKeypair {
+    /// ML-KEM-768 key pair
+    MlKem768 {
+        public: PublicKey,
+        private: PrivateKey,
+    },
+    /// ML-KEM-1024 key pair
+    MlKem1024 {
+        public: PublicKey,
+        private: PrivateKey,
+    },
+    /// X-Wing hybrid key pair
+    XWingMLKem768X25519(XWingKeyPair),
+}
+
+impl KemKeypair {
+    /// Returns the parameter set for this key pair.
+    #[must_use]
+    pub const fn parameter_set(&self) -> KemParameterSet {
+        match self {
+            Self::MlKem768 { .. } => KemParameterSet::MlKem768,
+            Self::MlKem1024 { .. } => KemParameterSet::MlKem1024,
+            Self::XWingMLKem768X25519(_) => KemParameterSet::XWingMLKem768X25519,
+        }
+    }
+}
+
+/// Result of KEM encapsulation.
+pub struct KemEncapResult {
+    /// The shared secret bytes.
+    pub shared_secret: Vec<u8>,
+    /// The ciphertext to send to the private key holder.
+    pub ciphertext: Vec<u8>,
+}
+
+// ============================================================================
+// Internal ML-KEM functions (PK11-based)
+// ============================================================================
+
 /// Type alias for PK11 attribute flags.
 type Pk11AttrFlags = PRUint32;
 
-/// Generate an ML-KEM key pair.
-///
-/// # Arguments
-///
-/// * `params` - The ML-KEM parameter set to use.
-///
-/// # Errors
-///
-/// Returns an error if NSS initialization fails or key generation fails.
-pub fn generate_keypair(params: MlKemParameterSet) -> Res<MlKemKeypair> {
+/// Generate an ML-KEM key pair (internal).
+pub(crate) fn mlkem_generate_keypair(params: MlKemParameterSet) -> Res<MlKemKeypair> {
     init()?;
 
     let slot = Slot::internal()?;
 
-    // Create the parameter for key generation (the parameter set as CK_ULONG)
-    // The parameter is passed as a pointer to the CK_ULONG value
     let mut ck_param: p11::CK_ULONG = match params {
         MlKemParameterSet::MlKem768 => p11::CKP_ML_KEM_768.into(),
         MlKemParameterSet::MlKem1024 => p11::CKP_ML_KEM_1024.into(),
@@ -105,7 +225,6 @@ pub fn generate_keypair(params: MlKemParameterSet) -> Res<MlKemKeypair> {
 
     let mut public_ptr: *mut p11::SECKEYPublicKey = null_mut();
 
-    // Generate the key pair using the standard ML-KEM mechanism
     let private_ptr = unsafe {
         p11::PK11_GenerateKeyPair(
             *slot,
@@ -124,28 +243,8 @@ pub fn generate_keypair(params: MlKemParameterSet) -> Res<MlKemKeypair> {
     Ok(MlKemKeypair { public, private })
 }
 
-/// Encapsulate a shared secret using an ML-KEM public key.
-///
-/// This function generates a random shared secret and encapsulates it using
-/// the provided public key. The encapsulation (ciphertext) can be sent to
-/// the holder of the corresponding private key, who can decapsulate it to
-/// recover the same shared secret.
-///
-/// # Arguments
-///
-/// * `public_key` - The recipient's ML-KEM public key.
-/// * `target` - The target mechanism for the derived symmetric key (e.g., `CKM_HKDF_DERIVE`).
-///
-/// # Returns
-///
-/// A tuple of `(shared_secret, ciphertext)` where:
-/// - `shared_secret` is a symmetric key that can be used for further key derivation.
-/// - `ciphertext` is the encapsulation that should be sent to the private key holder.
-///
-/// # Errors
-///
-/// Returns an error if NSS initialization fails or encapsulation fails.
-pub fn encapsulate(
+/// Encapsulate using an ML-KEM public key (internal, returns `SymKey`).
+pub(crate) fn mlkem_encapsulate(
     public_key: &PublicKey,
     target: p11::CK_MECHANISM_TYPE,
 ) -> Res<(SymKey, Vec<u8>)> {
@@ -175,25 +274,8 @@ pub fn encapsulate(
     Ok((shared_secret, ciphertext))
 }
 
-/// Decapsulate a ciphertext using an ML-KEM private key.
-///
-/// This function recovers the shared secret from an encapsulation (ciphertext)
-/// using the corresponding private key.
-///
-/// # Arguments
-///
-/// * `private_key` - The ML-KEM private key.
-/// * `ciphertext` - The encapsulation received from the sender.
-/// * `target` - The target mechanism for the derived symmetric key (e.g., `CKM_HKDF_DERIVE`).
-///
-/// # Returns
-///
-/// The shared secret as a symmetric key.
-///
-/// # Errors
-///
-/// Returns an error if NSS initialization fails or decapsulation fails.
-pub fn decapsulate(
+/// Decapsulate an ML-KEM ciphertext (internal, returns `SymKey`).
+pub(crate) fn mlkem_decapsulate(
     private_key: &PrivateKey,
     ciphertext: &[u8],
     target: p11::CK_MECHANISM_TYPE,
@@ -224,6 +306,159 @@ pub fn decapsulate(
     Ok(shared_secret)
 }
 
+// ============================================================================
+// Public API
+// ============================================================================
+
+/// Generate a KEM key pair for the specified parameter set.
+///
+/// # Arguments
+///
+/// * `params` - The KEM parameter set to use.
+///
+/// # Returns
+///
+/// A `KemKeypair` containing the public and private keys.
+///
+/// # Errors
+///
+/// Returns an error if NSS initialization fails or key generation fails.
+///
+/// # Example
+///
+/// ```ignore
+/// use nss_rs::kem::{generate_keypair, KemParameterSet};
+///
+/// let keypair = generate_keypair(KemParameterSet::XWingMLKem768X25519)?;
+/// ```
+pub fn generate_keypair(params: KemParameterSet) -> Res<KemKeypair> {
+    match params {
+        KemParameterSet::MlKem768 => {
+            let kp = mlkem_generate_keypair(MlKemParameterSet::MlKem768)?;
+            Ok(KemKeypair::MlKem768 {
+                public: kp.public,
+                private: kp.private,
+            })
+        }
+        KemParameterSet::MlKem1024 => {
+            let kp = mlkem_generate_keypair(MlKemParameterSet::MlKem1024)?;
+            Ok(KemKeypair::MlKem1024 {
+                public: kp.public,
+                private: kp.private,
+            })
+        }
+        KemParameterSet::XWingMLKem768X25519 => {
+            let kp = XWingKeyPair::generate()?;
+            Ok(KemKeypair::XWingMLKem768X25519(kp))
+        }
+    }
+}
+
+/// Encapsulate a shared secret using a KEM public key.
+///
+/// This function generates a random shared secret and encapsulates it using
+/// the provided key pair's public key. The ciphertext can be sent to the
+/// holder of the private key, who can decapsulate it to recover the same
+/// shared secret.
+///
+/// # Arguments
+///
+/// * `keypair` - The KEM key pair (only the public key is used).
+///
+/// # Returns
+///
+/// A `KemEncapResult` containing:
+/// - `shared_secret`: The raw shared secret bytes.
+/// - `ciphertext`: The encapsulation to send to the private key holder.
+///
+/// # Errors
+///
+/// Returns an error if NSS initialization fails or encapsulation fails.
+///
+/// # Example
+///
+/// ```ignore
+/// use nss_rs::kem::{generate_keypair, encapsulate, KemParameterSet};
+///
+/// let keypair = generate_keypair(KemParameterSet::XWingMLKem768X25519)?;
+/// let result = encapsulate(&keypair)?;
+/// // Send result.ciphertext to the private key holder
+/// // Use result.shared_secret for key derivation
+/// ```
+pub fn encapsulate(keypair: &KemKeypair) -> Res<KemEncapResult> {
+    match keypair {
+        KemKeypair::MlKem768 { public, .. } | KemKeypair::MlKem1024 { public, .. } => {
+            let target = p11::CKM_HKDF_DERIVE.into();
+            let (sym_key, ciphertext) = mlkem_encapsulate(public, target)?;
+            let shared_secret = sym_key.key_data()?.to_vec();
+            Ok(KemEncapResult {
+                shared_secret,
+                ciphertext,
+            })
+        }
+        KemKeypair::XWingMLKem768X25519(xwing_kp) => {
+            let result = xwing_encapsulate(&xwing_kp.mlkem_public, &xwing_kp.x25519_public)?;
+            Ok(KemEncapResult {
+                shared_secret: result.shared_secret.to_vec(),
+                ciphertext: result.ciphertext,
+            })
+        }
+    }
+}
+
+/// Decapsulate a ciphertext using a KEM private key.
+///
+/// This function recovers the shared secret from a ciphertext using the
+/// corresponding private key.
+///
+/// # Arguments
+///
+/// * `keypair` - The KEM key pair (the private key is used for decapsulation).
+/// * `ciphertext` - The encapsulation received from the sender.
+///
+/// # Returns
+///
+/// The shared secret as a byte vector.
+///
+/// # Errors
+///
+/// Returns an error if NSS initialization fails, decapsulation fails,
+/// or the ciphertext is invalid for the key type.
+///
+/// # Example
+///
+/// ```ignore
+/// use nss_rs::kem::{generate_keypair, decapsulate, KemParameterSet};
+///
+/// let keypair = generate_keypair(KemParameterSet::XWingMLKem768X25519)?;
+/// // ... receive ciphertext from sender ...
+/// let shared_secret = decapsulate(&keypair, &ciphertext)?;
+/// ```
+pub fn decapsulate(keypair: &KemKeypair, ciphertext: &[u8]) -> Res<Vec<u8>> {
+    // Validate ciphertext length
+    let expected_len = keypair.parameter_set().ciphertext_bytes();
+    if ciphertext.len() != expected_len {
+        return Err(Error::InvalidInput);
+    }
+
+    match keypair {
+        KemKeypair::MlKem768 { private, .. } | KemKeypair::MlKem1024 { private, .. } => {
+            let target = p11::CKM_HKDF_DERIVE.into();
+            let sym_key = mlkem_decapsulate(private, ciphertext, target)?;
+            Ok(sym_key.key_data()?.to_vec())
+        }
+        KemKeypair::XWingMLKem768X25519(xwing_kp) => {
+            let ss = xwing_decapsulate(
+                ciphertext,
+                &xwing_kp.mlkem_private,
+                &xwing_kp.x25519_private,
+                &xwing_kp.x25519_public,
+            )?;
+            Ok(ss.to_vec())
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -231,83 +466,158 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn generate_mlkem768_keypair() {
-        fixture_init();
-        let keypair = generate_keypair(MlKemParameterSet::MlKem768).unwrap();
-        // Keypair was successfully created (from_ptr would have failed if null)
-        assert!(!(*keypair.public).is_null());
-        assert!(!(*keypair.private).is_null());
-    }
+    // ========================================================================
+    // Unified API tests
+    // ========================================================================
 
     #[test]
-    fn generate_mlkem1024_keypair() {
-        fixture_init();
-        let keypair = generate_keypair(MlKemParameterSet::MlKem1024).unwrap();
-        // Keypair was successfully created (from_ptr would have failed if null)
-        assert!(!(*keypair.public).is_null());
-        assert!(!(*keypair.private).is_null());
-    }
-
-    #[test]
-    fn encapsulate_decapsulate_mlkem768() {
+    fn test_mlkem768_unified() {
         fixture_init();
 
-        // Generate a key pair
-        let keypair = generate_keypair(MlKemParameterSet::MlKem768).unwrap();
+        let keypair = generate_keypair(KemParameterSet::MlKem768).unwrap();
+        assert_eq!(keypair.parameter_set(), KemParameterSet::MlKem768);
 
-        // Encapsulate using the public key
-        let target = p11::CKM_HKDF_DERIVE.into();
-        let (shared_secret1, ciphertext) = encapsulate(&keypair.public, target).unwrap();
-
-        // Verify ciphertext size
+        let encap_result = encapsulate(&keypair).unwrap();
         assert_eq!(
-            ciphertext.len(),
-            MlKemParameterSet::MlKem768.ciphertext_bytes()
+            encap_result.ciphertext.len(),
+            KemParameterSet::MlKem768.ciphertext_bytes()
+        );
+        assert_eq!(
+            encap_result.shared_secret.len(),
+            KemParameterSet::MlKem768.shared_secret_bytes()
         );
 
-        // Decapsulate using the private key
-        let shared_secret2 = decapsulate(&keypair.private, &ciphertext, target).unwrap();
-
-        // Verify that both shared secrets are the same
-        let ss1 = shared_secret1.key_data().unwrap();
-        let ss2 = shared_secret2.key_data().unwrap();
-        assert_eq!(ss1, ss2);
-        assert_eq!(ss1.len(), MlKemParameterSet::MlKem768.shared_secret_bytes());
+        let decap_ss = decapsulate(&keypair, &encap_result.ciphertext).unwrap();
+        assert_eq!(encap_result.shared_secret, decap_ss);
     }
 
     #[test]
-    fn encapsulate_decapsulate_mlkem1024() {
+    fn test_mlkem1024_unified() {
         fixture_init();
 
-        // Generate a key pair
-        let keypair = generate_keypair(MlKemParameterSet::MlKem1024).unwrap();
+        let keypair = generate_keypair(KemParameterSet::MlKem1024).unwrap();
+        assert_eq!(keypair.parameter_set(), KemParameterSet::MlKem1024);
 
-        // Encapsulate using the public key
-        let target = p11::CKM_HKDF_DERIVE.into();
-        let (shared_secret1, ciphertext) = encapsulate(&keypair.public, target).unwrap();
-
-        // Verify ciphertext size
+        let encap_result = encapsulate(&keypair).unwrap();
         assert_eq!(
-            ciphertext.len(),
-            MlKemParameterSet::MlKem1024.ciphertext_bytes()
+            encap_result.ciphertext.len(),
+            KemParameterSet::MlKem1024.ciphertext_bytes()
+        );
+        assert_eq!(
+            encap_result.shared_secret.len(),
+            KemParameterSet::MlKem1024.shared_secret_bytes()
         );
 
-        // Decapsulate using the private key
-        let shared_secret2 = decapsulate(&keypair.private, &ciphertext, target).unwrap();
-
-        // Verify that both shared secrets are the same
-        let ss1 = shared_secret1.key_data().unwrap();
-        let ss2 = shared_secret2.key_data().unwrap();
-        assert_eq!(ss1, ss2);
-        assert_eq!(
-            ss1.len(),
-            MlKemParameterSet::MlKem1024.shared_secret_bytes()
-        );
+        let decap_ss = decapsulate(&keypair, &encap_result.ciphertext).unwrap();
+        assert_eq!(encap_result.shared_secret, decap_ss);
     }
 
     #[test]
-    fn parameter_set_sizes() {
+    fn test_xwing_unified() {
+        fixture_init();
+
+        let keypair = generate_keypair(KemParameterSet::XWingMLKem768X25519).unwrap();
+        assert_eq!(keypair.parameter_set(), KemParameterSet::XWingMLKem768X25519);
+        assert!(keypair.parameter_set().is_hybrid());
+
+        let encap_result = encapsulate(&keypair).unwrap();
+        assert_eq!(
+            encap_result.ciphertext.len(),
+            KemParameterSet::XWingMLKem768X25519.ciphertext_bytes()
+        );
+        assert_eq!(
+            encap_result.shared_secret.len(),
+            KemParameterSet::XWingMLKem768X25519.shared_secret_bytes()
+        );
+
+        let decap_ss = decapsulate(&keypair, &encap_result.ciphertext).unwrap();
+        assert_eq!(encap_result.shared_secret, decap_ss);
+    }
+
+    #[test]
+    fn test_xwing_multiple_rounds() {
+        fixture_init();
+
+        let keypair = generate_keypair(KemParameterSet::XWingMLKem768X25519).unwrap();
+
+        for _ in 0..3 {
+            let encap_result = encapsulate(&keypair).unwrap();
+            let decap_ss = decapsulate(&keypair, &encap_result.ciphertext).unwrap();
+            assert_eq!(encap_result.shared_secret, decap_ss);
+        }
+    }
+
+    #[test]
+    fn test_different_keypairs_different_secrets() {
+        fixture_init();
+
+        let keypair1 = generate_keypair(KemParameterSet::XWingMLKem768X25519).unwrap();
+        let keypair2 = generate_keypair(KemParameterSet::XWingMLKem768X25519).unwrap();
+
+        let encap1 = encapsulate(&keypair1).unwrap();
+        let encap2 = encapsulate(&keypair2).unwrap();
+
+        // Different keypairs should produce different shared secrets
+        assert_ne!(encap1.shared_secret, encap2.shared_secret);
+    }
+
+    #[test]
+    fn test_invalid_ciphertext_length() {
+        fixture_init();
+
+        let keypair = generate_keypair(KemParameterSet::XWingMLKem768X25519).unwrap();
+
+        // Too short
+        let short_ct = vec![0u8; KemParameterSet::XWingMLKem768X25519.ciphertext_bytes() - 1];
+        assert!(decapsulate(&keypair, &short_ct).is_err());
+
+        // Too long
+        let long_ct = vec![0u8; KemParameterSet::XWingMLKem768X25519.ciphertext_bytes() + 1];
+        assert!(decapsulate(&keypair, &long_ct).is_err());
+    }
+
+    #[test]
+    fn test_parameter_set_sizes() {
+        // ML-KEM-768
+        assert_eq!(KemParameterSet::MlKem768.public_key_bytes(), 1184);
+        assert_eq!(KemParameterSet::MlKem768.private_key_bytes(), 2400);
+        assert_eq!(KemParameterSet::MlKem768.ciphertext_bytes(), 1088);
+        assert_eq!(KemParameterSet::MlKem768.shared_secret_bytes(), 32);
+        assert!(!KemParameterSet::MlKem768.is_hybrid());
+
+        // ML-KEM-1024
+        assert_eq!(KemParameterSet::MlKem1024.public_key_bytes(), 1568);
+        assert_eq!(KemParameterSet::MlKem1024.private_key_bytes(), 3168);
+        assert_eq!(KemParameterSet::MlKem1024.ciphertext_bytes(), 1568);
+        assert_eq!(KemParameterSet::MlKem1024.shared_secret_bytes(), 32);
+        assert!(!KemParameterSet::MlKem1024.is_hybrid());
+
+        // X-Wing
+        assert_eq!(KemParameterSet::XWingMLKem768X25519.public_key_bytes(), XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE);
+        assert_eq!(KemParameterSet::XWingMLKem768X25519.private_key_bytes(), XWING_MLKEM768_X25519_SECRET_KEY_SIZE);
+        assert_eq!(KemParameterSet::XWingMLKem768X25519.ciphertext_bytes(), XWING_MLKEM768_X25519_CIPHERTEXT_SIZE);
+        assert_eq!(KemParameterSet::XWingMLKem768X25519.shared_secret_bytes(), XWING_MLKEM768_X25519_SHARED_SECRET_SIZE);
+        assert!(KemParameterSet::XWingMLKem768X25519.is_hybrid());
+    }
+
+    #[test]
+    fn test_mlkem_parameter_set_conversion() {
+        assert_eq!(
+            KemParameterSet::from(MlKemParameterSet::MlKem768),
+            KemParameterSet::MlKem768
+        );
+        assert_eq!(
+            KemParameterSet::from(MlKemParameterSet::MlKem1024),
+            KemParameterSet::MlKem1024
+        );
+    }
+
+    // ========================================================================
+    // Legacy API tests (for backwards compatibility)
+    // ========================================================================
+
+    #[test]
+    fn test_mlkem_parameter_set_sizes() {
         // ML-KEM-768 sizes
         assert_eq!(MlKemParameterSet::MlKem768.public_key_bytes(), 1184);
         assert_eq!(MlKemParameterSet::MlKem768.private_key_bytes(), 2400);
