@@ -231,6 +231,8 @@ functions = [
     "PK11_SignWithMechanism",
     "PK11_VerifyWithMechanism",
     "PK11_WrapPrivKey",
+    "PK11_Encapsulate",
+    "PK11_Decapsulate",
     "SECITEM_AllocItem",
     "SECITEM_ReallocItemV2",
     "SECKEY_CopyPrivateKey",
@@ -254,7 +256,6 @@ enums = [
 opaque = [
     "PK11ContextStr",
     "PK11SlotInfoStr",
-    "SECKEYPublicKeyStr",
 ]
 variables = [
     "AES_BLOCK_SIZE",
@@ -296,6 +297,14 @@ variables = [
     "CKM_SHA512_HMAC",
     "CKM_ECDSA",
     "CKM_EDDSA",
+    "CKM_ML_KEM_KEY_PAIR_GEN",
+    "CKM_ML_KEM",
+    "CKP_ML_KEM_512",
+    "CKP_ML_KEM_768",
+    "CKP_ML_KEM_1024",
+    "PK11_ATTR_SESSION",
+    "PK11_ATTR_INSENSITIVE",
+    "PK11_ATTR_SENSITIVE",
 ]
 
 [nspr_err]

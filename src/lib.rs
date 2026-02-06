@@ -40,6 +40,8 @@ pub mod der;
 pub mod ec;
 pub mod hash;
 pub mod hmac;
+pub mod kem;
+pub mod kem_combiners;
 pub mod p11;
 mod prio;
 mod replay;
@@ -79,7 +81,21 @@ pub use self::{
         KemId, SymmetricSuite,
     },
     err::{secstatus_to_res, Error, IntoResult, PRErrorCode, Res},
+    hash::{
+        hash, sha256, sha384, sha3_224, sha3_256, sha3_384, sha3_512, sha512, HashAlgorithm,
+    },
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    kem::{
+        decapsulate as kem_decapsulate, encapsulate as kem_encapsulate,
+        generate_keypair as kem_generate_keypair, import_mlkem_public_key, KemEncapResult,
+        KemKeypair, KemParameterSet, MlKemKeypair, MlKemParameterSet,
+    },
+    kem_combiners::{
+        import_x25519_public_key, import_xwing_public_key, xwing_decapsulate, xwing_encapsulate,
+        XWingEncapResult, XWingKeyPair, XWING_MLKEM768_X25519_CIPHERTEXT_SIZE,
+        XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE, XWING_MLKEM768_X25519_SECRET_KEY_SIZE,
+        XWING_MLKEM768_X25519_SHARED_SECRET_SIZE,
+    },
     p11::{random, randomize, PrivateKey, PublicKey, SymKey},
     replay::AntiReplay,
     secrets::SecretDirection,
