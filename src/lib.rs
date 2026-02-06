@@ -34,6 +34,7 @@ mod exp;
 pub mod ext;
 pub mod hkdf;
 pub mod hp;
+pub mod hpke;
 
 pub mod aead;
 pub mod der;
@@ -85,6 +86,7 @@ pub use self::{
         hash, sha256, sha384, sha3_224, sha3_256, sha3_384, sha3_512, sha512, HashAlgorithm,
     },
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    hpke::{HpkeHybridR, HpkeHybridS},
     kem::{
         decapsulate as kem_decapsulate, encapsulate as kem_encapsulate,
         generate_keypair as kem_generate_keypair, import_mlkem_public_key, KemEncapResult,
