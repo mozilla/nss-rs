@@ -307,6 +307,60 @@ pub(crate) fn mlkem_decapsulate(
 }
 
 // ============================================================================
+// ML-KEM Public Key Import
+// ============================================================================
+
+/// Import an ML-KEM public key from raw bytes.
+///
+/// Constructs a `SECKEYPublicKey` with `keyType = kyberKey` and the
+/// appropriate `KyberParams`, then uses `SECKEY_CopyPublicKey` to create
+/// a properly arena-backed copy, and `PK11_ImportPublicKey` to register
+/// it in PKCS#11.
+pub fn import_mlkem_public_key(
+    raw_key: &[u8],
+    params: MlKemParameterSet,
+) -> Res<PublicKey> {
+    init()?;
+
+    let expected_size = params.public_key_bytes();
+    if raw_key.len() != expected_size {
+        return Err(Error::InvalidInput);
+    }
+
+    let kyber_params = match params {
+        MlKemParameterSet::MlKem768 => p11::KyberParams_params_ml_kem768,
+        MlKemParameterSet::MlKem1024 => p11::KyberParams_params_ml_kem1024,
+    };
+
+    unsafe {
+        let mut temp_key: p11::SECKEYPublicKey = std::mem::zeroed();
+        temp_key.keyType = p11::KeyType_kyberKey;
+        temp_key.u.kyber.as_mut().params = kyber_params;
+        temp_key.u.kyber.as_mut().publicValue = SECItem {
+            type_: crate::SECItemType::siBuffer,
+            data: raw_key.as_ptr() as *mut u8,
+            len: raw_key.len() as u32,
+        };
+
+        // SECKEY_CopyPublicKey allocates a new arena and deep-copies
+        let copied: PublicKey = p11::SECKEY_CopyPublicKey(&temp_key).into_result()?;
+
+        // Register in PKCS#11
+        let slot = Slot::internal()?;
+        let handle = p11::PK11_ImportPublicKey(
+            *slot,
+            *copied,
+            crate::PR_FALSE,
+        );
+        if handle == pkcs11_bindings::CK_INVALID_HANDLE {
+            return Err(Error::InvalidInput);
+        }
+
+        Ok(copied)
+    }
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -610,6 +664,69 @@ mod tests {
             KemParameterSet::from(MlKemParameterSet::MlKem1024),
             KemParameterSet::MlKem1024
         );
+    }
+
+    // ========================================================================
+    // Legacy API tests (for backwards compatibility)
+    // ========================================================================
+
+    // ========================================================================
+    // Import tests
+    // ========================================================================
+
+    #[test]
+    fn test_mlkem768_import_public_key_roundtrip() {
+        use crate::err::secstatus_to_res;
+        use crate::util::SECItemMut;
+
+        fixture_init();
+
+        // Generate a keypair
+        let keypair = generate_keypair(KemParameterSet::MlKem768).unwrap();
+        let KemKeypair::MlKem768 {
+            ref public,
+            ref private,
+        } = keypair
+        else {
+            panic!("Expected MlKem768 keypair");
+        };
+
+        // Export public key bytes via PK11_ReadRawAttribute(CKA_VALUE)
+        let mut key_item = SECItemMut::make_empty();
+        secstatus_to_res(unsafe {
+            p11::PK11_ReadRawAttribute(
+                p11::PK11ObjectType::PK11_TypePubKey,
+                (**public).cast(),
+                pkcs11_bindings::CKA_VALUE,
+                key_item.as_mut(),
+            )
+        })
+        .unwrap();
+        let pk_bytes = key_item.as_slice().to_owned();
+        assert_eq!(pk_bytes.len(), MlKemParameterSet::MlKem768.public_key_bytes());
+
+        // Import from raw bytes
+        let imported_pk =
+            import_mlkem_public_key(&pk_bytes, MlKemParameterSet::MlKem768).unwrap();
+
+        // Encapsulate with imported public key
+        let target = p11::CKM_HKDF_DERIVE.into();
+        let (ss_key, ciphertext) = mlkem_encapsulate(&imported_pk, target).unwrap();
+        let shared_secret = ss_key.key_data().unwrap().to_vec();
+
+        // Decapsulate with original private key
+        let dec_key = mlkem_decapsulate(private, &ciphertext, target).unwrap();
+        let decap_ss = dec_key.key_data().unwrap().to_vec();
+
+        assert_eq!(shared_secret, decap_ss);
+    }
+
+    #[test]
+    fn test_mlkem_import_invalid_size() {
+        fixture_init();
+
+        let result = import_mlkem_public_key(&[0u8; 100], MlKemParameterSet::MlKem768);
+        assert!(result.is_err());
     }
 
     // ========================================================================

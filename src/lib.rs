@@ -87,12 +87,13 @@ pub use self::{
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     kem::{
         decapsulate as kem_decapsulate, encapsulate as kem_encapsulate,
-        generate_keypair as kem_generate_keypair, KemEncapResult, KemKeypair, KemParameterSet,
-        MlKemKeypair, MlKemParameterSet,
+        generate_keypair as kem_generate_keypair, import_mlkem_public_key, KemEncapResult,
+        KemKeypair, KemParameterSet, MlKemKeypair, MlKemParameterSet,
     },
     kem_combiners::{
-        xwing_decapsulate, xwing_encapsulate, XWingEncapResult, XWingKeyPair,
-        XWING_MLKEM768_X25519_CIPHERTEXT_SIZE, XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE, XWING_MLKEM768_X25519_SECRET_KEY_SIZE,
+        import_x25519_public_key, import_xwing_public_key, xwing_decapsulate, xwing_encapsulate,
+        XWingEncapResult, XWingKeyPair, XWING_MLKEM768_X25519_CIPHERTEXT_SIZE,
+        XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE, XWING_MLKEM768_X25519_SECRET_KEY_SIZE,
         XWING_MLKEM768_X25519_SHARED_SECRET_SIZE,
     },
     p11::{random, randomize, PrivateKey, PublicKey, SymKey},

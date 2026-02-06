@@ -154,8 +154,8 @@ fn xwing_combiner(
 /// RFC 8410 OID for X25519: 1.3.101.110
 const RFC8410_OID_X25519: &[u8] = &[0x2b, 0x65, 0x6e];
 
-/// Import a raw X25519 public key.
-fn import_x25519_public_key(raw_key: &[u8; 32]) -> Res<PublicKey> {
+/// Import a raw X25519 public key from 32 bytes.
+pub fn import_x25519_public_key(raw_key: &[u8; 32]) -> Res<PublicKey> {
     // Build SPKI structure for X25519 per RFC 8410
     // SEQUENCE {
     //   SEQUENCE {
@@ -192,6 +192,31 @@ fn import_x25519_public_key(raw_key: &[u8; 32]) -> Res<PublicKey> {
     spki.extend_from_slice(raw_key);
 
     import_ec_public_key_from_spki(&spki)
+}
+
+/// Import an X-Wing (ML-KEM-768 + X25519) public key from raw bytes.
+///
+/// Expects 1216 bytes: 1184 bytes ML-KEM-768 || 32 bytes X25519.
+/// Returns a tuple of (mlkem_public, x25519_public) `PublicKey` objects
+/// suitable for passing to `xwing_encapsulate()`.
+pub fn import_xwing_public_key(
+    raw_key: &[u8],
+) -> Res<(PublicKey, PublicKey)> {
+    use crate::kem::{import_mlkem_public_key, MlKemParameterSet};
+
+    if raw_key.len() != XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE {
+        return Err(Error::InvalidInput);
+    }
+
+    let mlkem_pk_bytes = &raw_key[..MLKEM768_PUBLIC_KEY_SIZE];
+    let x25519_pk_bytes: &[u8; 32] = raw_key[MLKEM768_PUBLIC_KEY_SIZE..]
+        .try_into()
+        .map_err(|_| Error::InvalidInput)?;
+
+    let mlkem_pk = import_mlkem_public_key(mlkem_pk_bytes, MlKemParameterSet::MlKem768)?;
+    let x25519_pk = import_x25519_public_key(x25519_pk_bytes)?;
+
+    Ok((mlkem_pk, x25519_pk))
 }
 
 /// Encapsulate using an X-Wing public key.
@@ -447,6 +472,64 @@ mod tests {
             &keypair.x25519_private,
             &keypair.x25519_public,
         );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_xwing_import_public_key_roundtrip() {
+        use crate::err::secstatus_to_res;
+        use crate::p11;
+        use crate::util::SECItemMut;
+
+        fixture_init();
+
+        let keypair = XWingKeyPair::generate().unwrap();
+
+        // Export ML-KEM public key bytes via PK11_ReadRawAttribute(CKA_VALUE)
+        let mut key_item = SECItemMut::make_empty();
+        secstatus_to_res(unsafe {
+            p11::PK11_ReadRawAttribute(
+                p11::PK11ObjectType::PK11_TypePubKey,
+                (*keypair.mlkem_public).cast(),
+                pkcs11_bindings::CKA_VALUE,
+                key_item.as_mut(),
+            )
+        })
+        .unwrap();
+        let mlkem_pk_bytes = key_item.as_slice().to_owned();
+
+        // Export X25519 public key bytes
+        let x25519_raw = extract_x25519_public_key_bytes(&keypair.x25519_public).unwrap();
+
+        // Concatenate: ML-KEM-768 pk || X25519 pk
+        let mut combined = Vec::with_capacity(XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE);
+        combined.extend_from_slice(&mlkem_pk_bytes);
+        combined.extend_from_slice(&x25519_raw);
+        assert_eq!(combined.len(), XWING_MLKEM768_X25519_PUBLIC_KEY_SIZE);
+
+        // Import
+        let (imported_mlkem, imported_x25519) = import_xwing_public_key(&combined).unwrap();
+
+        // Encapsulate with imported keys
+        let encap = xwing_encapsulate(&imported_mlkem, &imported_x25519).unwrap();
+
+        // Decapsulate with original private keys
+        let ss = xwing_decapsulate(
+            &encap.ciphertext,
+            &keypair.mlkem_private,
+            &keypair.x25519_private,
+            &keypair.x25519_public,
+        )
+        .unwrap();
+
+        assert_eq!(encap.shared_secret, ss);
+    }
+
+    #[test]
+    fn test_xwing_import_invalid_size() {
+        fixture_init();
+
+        let result = import_xwing_public_key(&[0u8; 100]);
         assert!(result.is_err());
     }
 }

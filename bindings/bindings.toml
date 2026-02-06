@@ -256,7 +256,6 @@ enums = [
 opaque = [
     "PK11ContextStr",
     "PK11SlotInfoStr",
-    "SECKEYPublicKeyStr",
 ]
 variables = [
     "AES_BLOCK_SIZE",
