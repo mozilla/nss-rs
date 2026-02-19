@@ -8,7 +8,7 @@
 #![cfg(not(feature = "disable-encryption"))]
 
 use nss_rs::{
-    Aead, AeadTrait as _,
+    RecordProtection,
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
 };
@@ -28,7 +28,7 @@ const PLAINTEXT: &[u8] = &[
     0x03, 0x04,
 ];
 
-fn make_aead(cipher: Cipher) -> Aead {
+fn make_aead(cipher: Cipher) -> RecordProtection {
     fixture_init();
 
     let secret = hkdf::import_key(
@@ -40,7 +40,7 @@ fn make_aead(cipher: Cipher) -> Aead {
         ],
     )
     .expect("make a secret");
-    Aead::new(
+    RecordProtection::new(
         TLS_VERSION_1_3,
         cipher,
         &secret,

@@ -9,8 +9,7 @@ use std::{fmt::Write as _, io::Write as _, mem};
 use log::{info, trace};
 
 use crate::{
-    Aead,
-    aead::AeadTrait as _,
+    RecordProtection,
     constants::{Cipher, Version},
     err::{Error, Res},
     hkdf,
@@ -53,11 +52,11 @@ impl SelfEncrypt {
         })
     }
 
-    fn make_aead(&self, k: &SymKey, salt: &[u8]) -> Res<Aead> {
+    fn make_aead(&self, k: &SymKey, salt: &[u8]) -> Res<RecordProtection> {
         debug_assert_eq!(salt.len(), Self::SALT_LENGTH);
         let salt = hkdf::import_key(self.version, salt)?;
         let secret = hkdf::extract(self.version, self.cipher, Some(&salt), k)?;
-        Aead::new(self.version, self.cipher, &secret, "neqo self")
+        RecordProtection::new(self.version, self.cipher, &secret, "neqo self")
     }
 
     /// Rotate keys.  This causes any previous key that is being held to be replaced by the current

@@ -6,8 +6,6 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-#[cfg(feature = "disable-encryption")]
-pub mod aead_null;
 pub mod agent;
 mod agentio;
 mod auth;
@@ -53,14 +51,8 @@ mod _link_anchor {
     use windows::Win32::Security::Authentication::Identity::RtlGenRandom as _;
 }
 
-#[cfg(not(feature = "disable-encryption"))]
-pub use self::aead::RealAead as Aead;
-#[cfg(feature = "disable-encryption")]
-pub use self::aead::RealAead;
-#[cfg(feature = "disable-encryption")]
-pub use self::aead_null::AeadNull as Aead;
 pub use self::{
-    aead::AeadTrait,
+    aead::RecordProtection,
     agent::{
         Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken,
         SecretAgent, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttCheckResult,
