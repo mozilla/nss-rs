@@ -9,49 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   actionlint:
-    name: actionlint 🛠️
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Download actionlint
-        id: get_actionlint
-        run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-
-      - name: Check workflow files
-        env:
-          ACTIONLINT: ${{ steps.get_actionlint.outputs.executable }}
-        run: |
-          echo "::add-matcher::.github/actionlint-matcher.json"
-          $ACTIONLINT -color
-
-  zizmor:
-    name: zizmor 🌈
-    runs-on: ubuntu-24.04
+    uses: mozilla/actions/.github/workflows/actionlint.yml@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
     permissions:
-      security-events: write # This permission is required to upload SARIF files.
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
-
-      - run: uvx zizmor --persona auditor --format sarif . > results.sarif
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
-        with:
-          sarif_file: results.sarif
-          category: zizmor
+      contents: read
+      security-events: write # Required to upload SARIF results.

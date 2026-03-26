@@ -532,7 +532,7 @@ fn process_config(config: &mut HashMap<String, Bindings>) {
             .get_mut(&header)
             .expect("key disappeared from config?")
             .exclude
-            .extend(excludes.into_iter());
+            .extend(excludes);
     }
 }
 

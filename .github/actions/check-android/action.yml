@@ -1,27 +1,24 @@
-name: 'CI VM'
-description: 'Run main CI steps in VMs for VM-only platforms.'
+name: "CI VM"
+description: "Run main CI steps in VMs for VM-only platforms."
 
 inputs:
   target:
-    description: 'Rust target to build for.'
+    description: "Rust target to build for."
     required: true
   working-directory:
-    description: 'Working directory.'
-    default: '.'
+    description: "Working directory."
+    default: "."
   ndk-version:
-    description: 'NDK version to install.'
+    description: "NDK version to install."
     # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
-    default: '27.2.12479018'
+    default: "27.2.12479018"
   api-level:
-    description: 'Android API level to use.'
+    description: "Android API level to use."
     # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
     # However, NSS requires an API >= 23 for a few symbols.
-    default: '23'
-  minimum-nss-version:
-    description: 'If NSS is required, the minimum version required.'
-    default: ''
+    default: "23"
   github-token:
-    description: 'A Github PAT'
+    description: "A Github PAT"
     required: true
 
 runs:
@@ -43,18 +40,18 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: ./.github/actions/rust
+    - uses: mozilla/actions/rust@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
         token: ${{ inputs.github-token }}
 
-    - uses: ./.github/actions/nss
-      if: ${{ inputs.minimum-nss-version != '' }}
+    - uses: mozilla/actions/nss@b6b1031d2072eb8c2b181887cb5e194ebcc5caab # v1.0.4
       with:
-        minimum-version: ${{ inputs.minimum-nss-version }}
+        version-file: min_version.txt
         target: ${{ inputs.target }}
+        token: ${{ inputs.github-token }}
 
     - shell: bash
       env:
@@ -71,7 +68,7 @@ runs:
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
-        cat <<'EOF' > /tmp/rust-android-run-tests-on-emulator.sh
+        cat <<'SCRIPT' > /tmp/rust-android-run-tests-on-emulator.sh
         #!/bin/bash
         set -ex
         adb wait-for-device
@@ -88,7 +85,7 @@ runs:
           grep _FAIL_ output > /dev/null && any_failures=1
         done
         exit $any_failures
-        EOF
+        SCRIPT
         chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
 
     - uses: reactivecircus/android-emulator-runner@b530d96654c385303d652368551fb075bc2f0b6b # v2.35.0
