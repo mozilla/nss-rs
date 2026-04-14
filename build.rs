@@ -65,36 +65,70 @@ struct Bindings {
 // bindgen needs access to libclang.
 // On windows, this doesn't just work, you have to set LIBCLANG_PATH.
 // Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
+// On macOS, clang-sys prefers the highest-versioned libclang it can find, which may be a
+// Homebrew LLVM that doesn't have the correct macOS SDK include paths, resulting in broken
+// bindings. Force use of Xcode's libclang instead.
 fn setup_clang() {
-    // If this isn't Windows, or we're in CI, then we don't need to do anything.
-    if env::consts::OS != "windows" || env::var("GITHUB_WORKFLOW").unwrap_or_default() == "CI" {
+    println!("cargo:rerun-if-env-changed=LIBCLANG_PATH");
+    println!("cargo:rerun-if-env-changed=CI");
+    // In CI, the environment is already configured correctly.
+    if env::var("CI").is_ok() {
         return;
     }
-    println!("rerun-if-env-changed=LIBCLANG_PATH");
-    println!("rerun-if-env-changed=MOZBUILD_STATE_PATH");
     if env::var("LIBCLANG_PATH").is_ok() {
         return;
     }
-    let mozbuild_root = if let Ok(dir) = env::var("MOZBUILD_STATE_PATH") {
-        PathBuf::from(dir.trim())
-    } else {
-        eprintln!("warning: Building without a gecko setup is not likely to work.");
-        eprintln!("         A working libclang is needed to build nss-rs.");
-        eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-        eprintln!();
-        eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
-        eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
-        eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");
-        return;
-    };
-    let libclang_dir = mozbuild_root.join("clang").join("lib");
-    if libclang_dir.is_dir() {
-        unsafe {
-            env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+    if env::consts::OS == "macos" {
+        if let Ok(output) = Command::new("xcode-select").arg("--print-path").output() {
+            if output.status.success() {
+                let xcode_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let candidates = [
+                    PathBuf::from(&xcode_path).join("Toolchains/XcodeDefault.xctoolchain/usr/lib"),
+                    PathBuf::from(&xcode_path).join("usr/lib"),
+                ];
+                if let Some(libclang_dir) = candidates.iter().find(|p| p.is_dir()) {
+                    unsafe {
+                        env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+                    }
+                } else {
+                    println!(
+                        "cargo:warning=Xcode toolchain libclang not found at {}; set LIBCLANG_PATH if build fails",
+                        candidates[0].display()
+                    );
+                }
+            } else {
+                println!(
+                    "cargo:warning=xcode-select returned an error; set LIBCLANG_PATH if build fails"
+                );
+            }
+        } else {
+            println!("cargo:warning=xcode-select not found; set LIBCLANG_PATH if build fails");
         }
-        println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
-    } else {
-        println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
+    } else if env::consts::OS == "windows" {
+        println!("cargo:rerun-if-env-changed=MOZBUILD_STATE_PATH");
+        let mozbuild_root = if let Ok(dir) = env::var("MOZBUILD_STATE_PATH") {
+            PathBuf::from(dir.trim())
+        } else {
+            println!("cargo:warning=Building without a gecko setup is not likely to work.");
+            println!("cargo:warning=A working libclang is needed to build nss-rs.");
+            println!("cargo:warning=Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
+            println!(
+                "cargo:warning=We recommend checking out https://github.com/mozilla/gecko-dev"
+            );
+            println!("cargo:warning=Then run `./mach bootstrap` which will retrieve clang.");
+            println!("cargo:warning=Make sure to export MOZBUILD_STATE_PATH when building.");
+            return;
+        };
+        let libclang_dir = mozbuild_root.join("clang").join("lib");
+        if libclang_dir.is_dir() {
+            unsafe {
+                env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+            }
+        } else {
+            println!(
+                "cargo:warning=LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko"
+            );
+        }
     }
 }
 
@@ -167,8 +201,7 @@ fn build_nss(dir: PathBuf) {
         // Generate static libraries in addition to shared libraries.
         String::from("--static"),
     ];
-    let target = env::var("TARGET").unwrap();
-    if target.starts_with("aarch64-") {
+    if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "aarch64" {
         build_nss.push(String::from("--target=arm64"));
     }
     let status = Command::new(get_bash())
@@ -180,7 +213,8 @@ fn build_nss(dir: PathBuf) {
 }
 
 fn dynamic_link() {
-    let dynamic_libs = if env::consts::OS == "windows" {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let dynamic_libs = if target_os == "windows" {
         [
             "nssutil3.dll",
             "nss3.dll",
@@ -198,12 +232,13 @@ fn dynamic_link() {
 }
 
 fn static_link() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let mut static_libs = vec![
         "certdb",
         "certhi",
         "cryptohi",
         "freebl_static",
-        if env::consts::OS == "windows" {
+        if target_os == "windows" {
             "libnspr4"
         } else {
             "nspr4"
@@ -215,12 +250,12 @@ fn static_link() {
         "nsspki",
         "nssutil",
         "pk11wrap_static",
-        if env::consts::OS == "windows" {
+        if target_os == "windows" {
             "libplc4"
         } else {
             "plc4"
         },
-        if env::consts::OS == "windows" {
+        if target_os == "windows" {
             "libplds4"
         } else {
             "plds4"
@@ -230,7 +265,7 @@ fn static_link() {
     ];
     // macOS always dynamically links against the system sqlite library.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
-    if env::consts::OS == "macos" {
+    if target_os == "macos" {
         println!("cargo:rustc-link-lib=dylib=sqlite3");
     } else {
         static_libs.push("sqlite");
@@ -263,11 +298,7 @@ fn static_link() {
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     let nsprinclude = nsstarget.join("include").join("nspr");
     let nssinclude = nssdist.join("public").join("nss");
-    let includes = vec![nsprinclude, nssinclude];
-    for i in &includes {
-        println!("cargo:include={}", i.to_str().unwrap());
-    }
-    includes
+    vec![nsprinclude, nssinclude]
 }
 
 fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
@@ -285,14 +316,15 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
     builder = builder.clang_arg("-v");
 
     if !gecko {
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
         builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
-        if env::consts::OS == "windows" {
+        if target_os == "windows" {
             builder = builder.clang_arg("-DWIN");
-        } else if env::consts::OS == "macos" {
+        } else if target_os == "macos" {
             builder = builder.clang_arg("-DDARWIN");
-        } else if env::consts::OS == "linux" {
+        } else if target_os == "linux" {
             builder = builder.clang_arg("-DLINUX");
-        } else if env::consts::OS == "android" {
+        } else if target_os == "android" {
             builder = builder.clang_arg("-DLINUX");
             builder = builder.clang_arg("-DANDROID");
         }
@@ -365,11 +397,9 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
 
     let mut flags: Vec<String> = Vec::new();
 
-    for f in cfg_str.split(' ') {
-        if let Some(include) = f.strip_prefix("-I") {
+    for f in cfg_str.split_whitespace() {
+        if f.starts_with("-I") {
             flags.push(String::from(f));
-
-            println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
             println!("cargo:rustc-link-search=native={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
@@ -383,15 +413,12 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
 }
 
 fn setup_standalone(nss_dir: String) -> Vec<String> {
-    setup_clang();
-
     let nss = PathBuf::from(nss_dir);
-    println!("cargo:rerun-if-env-changed={}", nss.display());
+    println!("cargo:rerun-if-env-changed=NSS_DIR");
     println!("cargo:rerun-if-env-changed=NSS_PREBUILT");
 
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
-    println!("cargo:rerun-if-env-changed={}", nssdist.display());
     let nsstarget = "Release";
 
     // If NSS_PREBUILT is set to a non-zero value, we assume that the NSS libraries are already
@@ -411,7 +438,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
     if env::var("CARGO_CFG_FUZZING").is_ok()
         || env::var("PROFILE").unwrap_or_default() == "debug"
         // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
-        || env::consts::OS == "windows"
+        || env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
     {
         static_link();
     } else {
@@ -537,7 +564,10 @@ fn process_config(config: &mut HashMap<String, Bindings>) {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/min_version.rs");
+    println!("cargo:rerun-if-changed=min_version.txt");
     println!("cargo:rustc-check-cfg=cfg(nss_nodb)");
+    setup_clang();
 
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
