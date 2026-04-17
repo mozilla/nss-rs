@@ -3,7 +3,7 @@
 
 use std::ffi::CStr;
 
-use nss::{
+use nss_rs::{
     AuthenticationStatus, Client, Error, HandshakeState, Res, SecretAgentPreInfo, Server,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
@@ -151,7 +151,7 @@ fn ocsp_stapling_and_signed_cert_timestamps() {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");
     client
-        .set_option(nss::Opt::SignedCertificateTimestamps, true)
+        .set_option(nss_rs::Opt::SignedCertificateTimestamps, true)
         .unwrap();
     let ocsp_response = b"fake ocsp response";
     let scts = b"fake signed certificate timestamps";

@@ -1,6 +1,6 @@
 [package]
-name = "nss"
-version = "0.8.0"
+name = "nss-rs"
+version = "0.3.0"
 authors = ["Martin Thomson <mt@lowentropy.net>", "Andy Leiserson <aleiserson@mozilla.com>", "John M. Schanck <jschanck@mozilla.com>", "Benjamin Beurdouche <beurdouche@mozilla.com>", "Anna Weine <anna.weine@mozilla.com>"]
 categories = ["network-programming", "web-programming"]
 keywords = ["nss", "crypto", "mozilla", "firefox"]
