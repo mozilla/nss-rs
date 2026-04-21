@@ -20,7 +20,7 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 // use crate::Result;
-use nss::ec::{Curve, PublicKey};
+use nss_rs::ec::{Curve, PublicKey};
 use nss_rs::HashAlgorithm;
 
 /// A signature verification algorithm.

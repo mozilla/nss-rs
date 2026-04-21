@@ -24,7 +24,7 @@ use nss_rs::init_db;
     dead_code,
     reason = "Code is bindgen-generated."
 )]
-mod nss {
+mod nss_init {
     use nss_rs::nss_prelude::*;
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
@@ -35,7 +35,7 @@ fn init_nodb() {
     nss_rs::init().unwrap();
     assert_initialized();
     unsafe {
-        assert_ne!(nss::NSS_IsInitialized(), 0);
+        assert_ne!(nss_init::NSS_IsInitialized(), 0);
     }
 }
 
@@ -45,6 +45,6 @@ fn init_withdb() {
     init_db(::test_fixture::NSS_DB_PATH).unwrap();
     assert_initialized();
     unsafe {
-        assert_ne!(nss::NSS_IsInitialized(), 0);
+        assert_ne!(nss_init::NSS_IsInitialized(), 0);
     }
 }
