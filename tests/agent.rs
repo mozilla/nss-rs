@@ -826,3 +826,130 @@ fn connection_fails_encoder_returned_too_long() {
 
     connect_fail(&mut client, &mut server);
 }
+
+fn connected_pair() -> (Client, Server) {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut client, &mut server);
+    (client, server)
+}
+
+#[test]
+fn export_keying_material_basic() {
+    let (client, _server) = connected_pair();
+
+    let mut material = vec![0u8; 32];
+    client
+        .export_keying_material(b"EXPORTER-test", &[], &mut material)
+        .expect("should export keying material");
+    assert_ne!(material, vec![0u8; 32]);
+}
+
+#[test]
+fn export_keying_material_differs_across_connections() {
+    let label = b"EXPORTER-test";
+    let context = b"context-data";
+
+    let (client1, _server1) = connected_pair();
+    let mut material1 = vec![0u8; 32];
+    client1
+        .export_keying_material(label, context, &mut material1)
+        .expect("first connection export");
+
+    let (client2, _server2) = connected_pair();
+    let mut material2 = vec![0u8; 32];
+    client2
+        .export_keying_material(label, context, &mut material2)
+        .expect("second connection export");
+
+    assert_ne!(
+        material1, material2,
+        "Different connections should produce different keying material"
+    );
+}
+
+#[test]
+fn export_keying_material_different_labels() {
+    let (client, _server) = connected_pair();
+
+    let mut material1 = vec![0u8; 32];
+    client
+        .export_keying_material(b"EXPORTER-test1", &[], &mut material1)
+        .expect("export with label1");
+    let mut material2 = vec![0u8; 32];
+    client
+        .export_keying_material(b"EXPORTER-test2", &[], &mut material2)
+        .expect("export with label2");
+
+    assert_ne!(
+        material1, material2,
+        "Different labels should produce different output"
+    );
+}
+
+#[test]
+fn export_keying_material_different_contexts() {
+    let (client, _server) = connected_pair();
+
+    let mut material1 = vec![0u8; 32];
+    client
+        .export_keying_material(b"EXPORTER-test", b"context1", &mut material1)
+        .expect("export with context1");
+    let mut material2 = vec![0u8; 32];
+    client
+        .export_keying_material(b"EXPORTER-test", b"context2", &mut material2)
+        .expect("export with context2");
+
+    assert_ne!(
+        material1, material2,
+        "Different contexts should produce different output"
+    );
+}
+
+#[test]
+fn export_keying_material_before_handshake() {
+    fixture_init();
+    let client = Client::new("server.example", true).expect("should create client");
+
+    assert_eq!(
+        client
+            .export_keying_material(b"EXPORTER-test", &[], &mut [0u8; 32])
+            .unwrap_err(),
+        Error::InvalidState
+    );
+}
+
+#[test]
+fn export_keying_material_zero_length() {
+    let (client, _server) = connected_pair();
+
+    assert_eq!(
+        client
+            .export_keying_material(b"EXPORTER-test", &[], &mut [])
+            .unwrap_err(),
+        Error::InvalidInput
+    );
+}
+
+#[test]
+fn export_keying_material_same_for_both_sides() {
+    let (client, server) = connected_pair();
+
+    let label = b"EXPORTER-test";
+    let context = b"shared-context";
+
+    let mut client_material = vec![0u8; 32];
+    client
+        .export_keying_material(label, context, &mut client_material)
+        .expect("client export");
+    let mut server_material = vec![0u8; 32];
+    server
+        .export_keying_material(label, context, &mut server_material)
+        .expect("server export");
+
+    assert_eq!(
+        client_material, server_material,
+        "Both sides should export identical material"
+    );
+}
