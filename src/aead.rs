@@ -512,6 +512,12 @@ impl Aead {
         })
     }
 
+    fn make_nonce(nonce: &mut [u8; NONCE_LEN], seq: SequenceNumber) {
+        for (n, &s) in nonce[NONCE_LEN - COUNTER_LEN..].iter_mut().zip(&seq.to_be_bytes()) {
+            *n ^= s;
+        }
+    }
+
     pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
         let slot = p11::Slot::internal().map_err(|_| Error::Internal)?;
 
@@ -590,10 +596,10 @@ impl Aead {
         Ok(ct)
     }
 
-    /// Encrypt with an explicit sequence number. Mirrors `open`'s nonce
+    /// Encrypt with an explicit sequence number. Mirrors `decrypt`'s nonce
     /// construction: the final nonce is `nonce_base XOR encode_be(seq)` over
     /// the trailing 8 bytes. The NSS PKCS#11 context's internal counter is
-    /// not used (CKG_NO_GENERATE). The caller must never reuse
+    /// not used (`CKG_NO_GENERATE`). The caller must never reuse
     /// `(nonce_base, seq)` with the same key.
     pub fn encrypt_with_seq(
         &mut self,
@@ -605,9 +611,7 @@ impl Aead {
 
         assert_eq!(self.mode, Mode::Encrypt);
         let mut nonce = self.nonce_base;
-        for (i, n) in nonce.iter_mut().rev().take(COUNTER_LEN).enumerate() {
-            *n ^= u8::try_from((seq >> (8 * i)) & 0xff).unwrap();
-        }
+        Aead::make_nonce(&mut nonce, seq);
         let mut ct = vec![0; pt.len() + TAG_LEN];
         let mut ct_len: c_int = 0;
         let mut tag = vec![0; TAG_LEN];
@@ -621,7 +625,7 @@ impl Aead {
                 aad.as_ptr(),
                 c_int_len(aad.len())?,
                 ct.as_mut_ptr(),
-                &mut ct_len,
+                &raw mut ct_len,
                 c_int_len(ct.len())?,
                 tag.as_mut_ptr(),
                 c_int_len(tag.len())?,
@@ -629,7 +633,7 @@ impl Aead {
                 c_int_len(pt.len())?,
             )
         })?;
-        ct.truncate(usize::try_from(ct_len).unwrap());
+        ct.truncate(usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?);
         debug_assert_eq!(ct.len(), pt.len());
         ct.append(&mut tag);
         Ok(ct)
@@ -645,9 +649,7 @@ impl Aead {
 
         assert_eq!(self.mode, Mode::Decrypt);
         let mut nonce = self.nonce_base;
-        for (i, n) in nonce.iter_mut().rev().take(COUNTER_LEN).enumerate() {
-            *n ^= u8::try_from((seq >> (8 * i)) & 0xff).map_err(|_| Error::IntegerOverflow)?;
-        }
+        Aead::make_nonce(&mut nonce, seq);
         let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
         let mut pt_len: c_int = 0;
         let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::AeadTruncated)?;
@@ -813,7 +815,7 @@ mod test {
         decrypt(ALG, KEY, NONCE_BASE, 654_360_564, AAD, PT, CT);
     }
 
-    fn roundtrip_seal_with_seq(algorithm: AeadAlgorithms, key: &[u8]) {
+    fn roundtrip_encrypt_with_seq(algorithm: AeadAlgorithms, key: &[u8]) {
         fixture_init();
 
         const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
@@ -831,14 +833,20 @@ mod test {
     }
 
     #[test]
-    fn seal_with_seq_aes128gcm() {
+    fn encrypt_with_seq_aes128gcm() {
         const KEY: &[u8] = &[0x42; 16];
-        roundtrip_seal_with_seq(AeadAlgorithms::Aes128Gcm, KEY);
+        roundtrip_encrypt_with_seq(AeadAlgorithms::Aes128Gcm, KEY);
     }
 
     #[test]
-    fn seal_with_seq_aes256gcm() {
+    fn encrypt_with_seq_aes256gcm() {
         const KEY: &[u8] = &[0x42; 32];
-        roundtrip_seal_with_seq(AeadAlgorithms::Aes256Gcm, KEY);
+        roundtrip_encrypt_with_seq(AeadAlgorithms::Aes256Gcm, KEY);
+    }
+
+    #[test]
+    fn seal_with_seq_chacha20poly1305() {
+        const KEY: &[u8] = &[0x42; 32];
+        roundtrip_encrypt_with_seq(AeadAlgorithms::ChaCha20Poly1305, KEY);
     }
 }
