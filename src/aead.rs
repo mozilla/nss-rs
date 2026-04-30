@@ -513,7 +513,10 @@ impl Aead {
     }
 
     fn make_nonce(nonce: &mut [u8; NONCE_LEN], seq: SequenceNumber) {
-        for (n, &s) in nonce[NONCE_LEN - COUNTER_LEN..].iter_mut().zip(&seq.to_be_bytes()) {
+        for (n, &s) in nonce[NONCE_LEN - COUNTER_LEN..]
+            .iter_mut()
+            .zip(&seq.to_be_bytes())
+        {
             *n ^= s;
         }
     }
@@ -611,7 +614,7 @@ impl Aead {
 
         assert_eq!(self.mode, Mode::Encrypt);
         let mut nonce = self.nonce_base;
-        Aead::make_nonce(&mut nonce, seq);
+        Self::make_nonce(&mut nonce, seq);
         let mut ct = vec![0; pt.len() + TAG_LEN];
         let mut ct_len: c_int = 0;
         let mut tag = vec![0; TAG_LEN];
@@ -649,7 +652,7 @@ impl Aead {
 
         assert_eq!(self.mode, Mode::Decrypt);
         let mut nonce = self.nonce_base;
-        Aead::make_nonce(&mut nonce, seq);
+        Self::make_nonce(&mut nonce, seq);
         let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
         let mut pt_len: c_int = 0;
         let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::AeadTruncated)?;
@@ -816,12 +819,12 @@ mod test {
     }
 
     fn roundtrip_encrypt_with_seq(algorithm: AeadAlgorithms, key: &[u8]) {
-        fixture_init();
-
         const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
         const AAD: &[u8] = b"associated";
         const PT: &[u8] = b"hello sframe";
         const SEQ: SequenceNumber = 0x0123_4567_89ab;
+
+        fixture_init();
 
         let k = Aead::import_key(algorithm, key).unwrap();
         let mut enc = Aead::new(Mode::Encrypt, algorithm, &k, NONCE_BASE).unwrap();
