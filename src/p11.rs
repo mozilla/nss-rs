@@ -195,7 +195,7 @@ impl Slot {
     }
 
     pub fn check_user_password(&self, password: &str) -> Res<()> {
-        let c_password = std::ffi::CString::new(password).map_err(|_| Error::String)?;
+        let c_password = std::ffi::CString::new(password)?;
         secstatus_to_res(unsafe { PK11_CheckUserPassword(self.ptr, c_password.as_ptr()) })
     }
 
