@@ -51,7 +51,7 @@ pub struct DirectionalSecrets {
 
 impl DirectionalSecrets {
     fn put(&mut self, epoch: Epoch, key: SymKey) {
-        debug_assert!(epoch != Epoch::Initial);
+        debug_assert_ne!(epoch, Epoch::Initial);
         self.secrets[epoch] = key;
     }
 

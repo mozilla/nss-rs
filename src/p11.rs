@@ -194,6 +194,19 @@ impl Slot {
         secstatus_to_res(unsafe { PK11_Authenticate(self.ptr, PRBool::from(true), null_mut()) })
     }
 
+    /// Check a user-supplied password against this slot.
+    ///
+    /// **Note:** This internally logs out before re-authenticating.
+    /// A failed check leaves the slot in a logged-out state.
+    pub fn check_user_password(&self, password: &str) -> Res<()> {
+        let c_password = std::ffi::CString::new(password)?;
+        secstatus_to_res(unsafe { PK11_CheckUserPassword(self.ptr, c_password.as_ptr()) })
+    }
+
+    pub fn logout(&self) -> Res<()> {
+        secstatus_to_res(unsafe { PK11_Logout(self.ptr) })
+    }
+
     /// Find a persistent symmetric key on this slot by nickname.
     /// Returns `None` if no key with the given nickname exists.
     #[must_use]

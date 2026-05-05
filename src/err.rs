@@ -84,6 +84,8 @@ pub enum Error {
     InvalidCertificateCompressionID,
     #[error("Invalid input")]
     InvalidInput,
+    #[error("Invalid state for this operation")]
+    InvalidState,
     #[error("Mixed handshake method")]
     MixedHandshakeMethod,
     #[error("No data available")]
