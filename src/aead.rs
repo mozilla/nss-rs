@@ -622,7 +622,7 @@ impl Aead {
             PK11_AEADOp(
                 *self.ctx,
                 CK_GENERATOR_FUNCTION::from(CKG_NO_GENERATE),
-                0,
+                c_int_len(NONCE_LEN - COUNTER_LEN)?,
                 nonce.as_mut_ptr(),
                 c_int_len(nonce.len())?,
                 aad.as_ptr(),
@@ -848,7 +848,7 @@ mod test {
     }
 
     #[test]
-    fn seal_with_seq_chacha20poly1305() {
+    fn encrypt_with_seq_chacha20poly1305() {
         const KEY: &[u8] = &[0x42; 32];
         roundtrip_encrypt_with_seq(AeadAlgorithms::ChaCha20Poly1305, KEY);
     }
