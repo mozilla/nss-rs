@@ -5,12 +5,10 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell,
     convert::TryFrom as _,
     fmt::{self, Debug},
     os::raw::{c_char, c_int, c_uint},
     ptr::{null, null_mut},
-    rc::Rc,
 };
 
 use pkcs11_bindings::{CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20};
@@ -41,16 +39,41 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
     secret: *mut *mut PK11SymKey,
 ));
 
-#[derive(Clone)]
+/// Creates an AES-ECB `PK11Context` from a `SymKey`.
+/// `PK11_CloneContext` is not supported for AES-ECB, so `Clone` stores the `SymKey`
+/// and recreates the context on first use via `mask`.
+fn make_aes_ctx(key: &SymKey) -> Res<Context> {
+    Context::from_ptr(unsafe {
+        PK11_CreateContextBySymKey(
+            CK_MECHANISM_TYPE::from(CKM_AES_ECB),
+            CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
+            **key,
+            SECItemBorrowed::make_empty().as_ref(),
+        )
+    })
+    .or(Err(Error::CipherInit))
+}
+
 pub enum Key {
-    /// An AES encryption context.
-    /// Note: as we need to clone this object, we clone the pointer and
-    /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
-    /// as that is not supported for these contexts.
-    Aes(Rc<RefCell<Context>>),
-    /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
-    /// change the counter and nonce on each invocation.
+    /// AES-ECB header-protection context.  `PK11_CloneContext` is not supported for
+    /// AES-ECB, so we store the `SymKey` and recreate `ctx` lazily on first use after
+    /// a clone.  `ctx` is `None` only between `clone()` and the first call to `mask`.
+    Aes { ctx: Option<Context>, key: SymKey },
+    /// The `ChaCha20` mask invokes `PK11_Encrypt` on each call because the counter
+    /// and nonce change per invocation.
     Chacha(SymKey),
+}
+
+impl Clone for Key {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Aes { key, .. } => Self::Aes {
+                ctx: None,
+                key: key.clone(),
+            },
+            Self::Chacha(k) => Self::Chacha(k.clone()),
+        }
+    }
 }
 
 impl Debug for Key {
@@ -72,8 +95,6 @@ impl Key {
     ///
     /// When `cipher` is not known to this code.
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
-        const ZERO: &[u8] = &[0; 12];
-
         let l = label.as_bytes();
         let mut secret: *mut PK11SymKey = null_mut();
 
@@ -104,17 +125,8 @@ impl Key {
 
         let res = match cipher {
             TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
-                let context_ptr = unsafe {
-                    PK11_CreateContextBySymKey(
-                        mech,
-                        CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
-                        *key,
-                        SECItemBorrowed::wrap(&ZERO[..0])?.as_ref(), /* Borrow a zero-length
-                                                                      * slice of ZERO. */
-                    )
-                };
-                let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInit))?;
-                Self::Aes(Rc::new(RefCell::new(context)))
+                let ctx = Some(make_aes_ctx(&key)?);
+                Self::Aes { ctx, key }
             }
             TLS_CHACHA20_POLY1305_SHA256 => Self::Chacha(key),
             _ => unreachable!(),
@@ -129,7 +141,7 @@ impl Key {
 
     const fn block_size(&self) -> usize {
         match self {
-            Self::Aes(_) => 16,
+            Self::Aes { .. } => 16,
             Self::Chacha(_) => 64,
         }
     }
@@ -143,15 +155,21 @@ impl Key {
     /// # Panics
     ///
     /// When the mechanism for our key is not supported.
-    pub fn mask(&self, sample: &[u8; Self::SAMPLE_SIZE]) -> Res<[u8; Self::SAMPLE_SIZE]> {
+    pub fn mask(&mut self, sample: &[u8; Self::SAMPLE_SIZE]) -> Res<[u8; Self::SAMPLE_SIZE]> {
         let mut output = [0; Self::SAMPLE_SIZE];
 
         match self {
-            Self::Aes(context) => {
+            Self::Aes { ctx, key } => {
+                if ctx.is_none() {
+                    *ctx = Some(make_aes_ctx(key)?);
+                }
+                let ctx = ctx.as_ref().expect("context initialized above");
                 let mut output_len: c_int = 0;
+                // SAFETY: AES-ECB is stateless — no IV or counter is mutated between
+                // calls — so using a raw pointer from &ctx is sound.
                 secstatus_to_res(unsafe {
                     PK11_CipherOp(
-                        **context.borrow_mut(),
+                        **ctx,
                         output.as_mut_ptr(),
                         &raw mut output_len,
                         c_int::try_from(output.len())?,
