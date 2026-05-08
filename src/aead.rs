@@ -311,6 +311,8 @@ mod recprot {
                 .len()
                 .checked_sub(super::TAG_LEN)
                 .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
+            let mut tag = [0u8; super::TAG_LEN];
+            tag.copy_from_slice(&data[ct_len..]);
             let data_ptr = data.as_mut_ptr();
             let out_len = unsafe {
                 aead_op(
@@ -320,7 +322,7 @@ mod recprot {
                     aad,
                     data_ptr,
                     data.len(),
-                    data_ptr.add(ct_len),
+                    tag.as_mut_ptr(),
                     data_ptr.cast_const(),
                     ct_len,
                 )

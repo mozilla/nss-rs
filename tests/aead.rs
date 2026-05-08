@@ -163,6 +163,13 @@ fn roundtrip(cipher: Cipher) {
         .decrypt(42, AAD, ct, &mut pt_buf[..ct.len()])
         .expect("decrypt");
     assert_eq!(pt, PLAINTEXT);
+
+    let mut ip_buf = Vec::from(PLAINTEXT);
+    ip_buf.resize(PLAINTEXT.len() + aead.expansion(), 0);
+    let enc_len = aead.encrypt_in_place(42, AAD, &mut ip_buf).unwrap();
+    assert_eq!(enc_len, ip_buf.len());
+    let dec_len = aead.decrypt_in_place(42, AAD, &mut ip_buf).unwrap();
+    assert_eq!(&ip_buf[..dec_len], PLAINTEXT);
 }
 
 #[test]
