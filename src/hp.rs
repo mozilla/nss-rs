@@ -56,8 +56,8 @@ fn make_aes_ctx(key: &SymKey) -> Res<Context> {
 
 pub enum Key {
     /// AES-ECB header-protection context.  `PK11_CloneContext` is not supported for
-    /// AES-ECB, so we store the `SymKey` and recreate `ctx` lazily on first use after
-    /// a clone.  `ctx` is `None` only between `clone()` and the first call to `mask`.
+    /// AES-ECB, so we store the `SymKey` and recreate `ctx` lazily: `mask` initialises
+    /// it on first use when `ctx` is `None`.
     Aes { ctx: Option<Context>, key: SymKey },
     /// The `ChaCha20` mask invokes `PK11_Encrypt` on each call because the counter
     /// and nonce change per invocation.
@@ -160,13 +160,15 @@ impl Key {
 
         match self {
             Self::Aes { ctx, key } => {
-                if ctx.is_none() {
-                    *ctx = Some(make_aes_ctx(key)?);
-                }
-                let ctx = ctx.as_ref().expect("context initialized above");
+                let ctx = if let Some(c) = ctx {
+                    c
+                } else {
+                    ctx.insert(make_aes_ctx(key)?)
+                };
                 let mut output_len: c_int = 0;
-                // SAFETY: AES-ECB is stateless — no IV or counter is mutated between
-                // calls — so using a raw pointer from &ctx is sound.
+                // SAFETY: `Deref` on `Context` yields a copy of the raw `*mut PK11Context`;
+                // no Rust reference to the pointee is created, and `&mut self` guarantees
+                // exclusive access to this `Key`.
                 secstatus_to_res(unsafe {
                     PK11_CipherOp(
                         **ctx,
