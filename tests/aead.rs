@@ -173,25 +173,3 @@ fn roundtrip_aes256() {
 fn roundtrip_chacha20() {
     roundtrip(TLS_CHACHA20_POLY1305_SHA256);
 }
-
-fn roundtrip(cipher: Cipher) {
-    let aead = make_aead(cipher);
-    let buf = &mut [0u8; 1024][..];
-
-    let ct = aead.encrypt(42, AAD, PLAINTEXT, buf).expect("encrypt");
-    let pt_buf = &mut [0u8; 1024][..];
-    let pt = aead
-        .decrypt(42, AAD, ct, &mut pt_buf[..ct.len()])
-        .expect("decrypt");
-    assert_eq!(pt, PLAINTEXT);
-}
-
-#[test]
-fn roundtrip_aes256() {
-    roundtrip(TLS_AES_256_GCM_SHA384);
-}
-
-#[test]
-fn roundtrip_chacha20() {
-    roundtrip(TLS_CHACHA20_POLY1305_SHA256);
-}
