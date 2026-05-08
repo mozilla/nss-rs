@@ -155,9 +155,9 @@ fn encrypt_decrypt_in_place() {
 
 fn roundtrip(cipher: Cipher) {
     let aead = make_aead(cipher);
-    let mut buf = &mut [0u8; 1024][..];
+    let buf = &mut [0u8; 1024][..];
 
-    let ct = aead.encrypt(42, AAD, PLAINTEXT, &mut buf).expect("encrypt");
+    let ct = aead.encrypt(42, AAD, PLAINTEXT, buf).expect("encrypt");
     let pt_buf = &mut [0u8; 1024][..];
     let pt = aead
         .decrypt(42, AAD, ct, &mut pt_buf[..ct.len()])
