@@ -40,8 +40,7 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
 ));
 
 /// Creates an AES-ECB `PK11Context` from a `SymKey`.
-/// `PK11_CloneContext` is not supported for AES-ECB, so `Clone` stores the `SymKey`
-/// and recreates the context on first use via `mask`.
+fn make_aes_ctx(key: &SymKey) -> Res<Context> {
 fn make_aes_ctx(key: &SymKey) -> Res<Context> {
     Context::from_ptr(unsafe {
         PK11_CreateContextBySymKey(
