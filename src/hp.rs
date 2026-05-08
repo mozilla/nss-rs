@@ -41,7 +41,6 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
 
 /// Creates an AES-ECB `PK11Context` from a `SymKey`.
 fn make_aes_ctx(key: &SymKey) -> Res<Context> {
-fn make_aes_ctx(key: &SymKey) -> Res<Context> {
     Context::from_ptr(unsafe {
         PK11_CreateContextBySymKey(
             CK_MECHANISM_TYPE::from(CKM_AES_ECB),
@@ -57,9 +56,11 @@ pub enum Key {
     /// AES-ECB header-protection context.  `PK11_CloneContext` is not supported for
     /// AES-ECB, so we store the `SymKey` and recreate `ctx` lazily: `mask` initialises
     /// it on first use when `ctx` is `None`.
+    #[non_exhaustive]
     Aes { ctx: Option<Context>, key: SymKey },
     /// The `ChaCha20` mask invokes `PK11_Encrypt` on each call because the counter
     /// and nonce change per invocation.
+    #[non_exhaustive]
     Chacha(SymKey),
 }
 
