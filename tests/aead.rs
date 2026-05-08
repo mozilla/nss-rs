@@ -9,7 +9,10 @@
 
 use nss_rs::{
     RecordProtection,
-    constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
+    constants::{
+        Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+        TLS_VERSION_1_3,
+    },
     hkdf,
 };
 use test_fixture::fixture_init;
@@ -148,4 +151,26 @@ fn encrypt_decrypt_in_place() {
     let decrypted_len = aead.decrypt_in_place(0, b"aad", &mut buffer).unwrap();
     assert_eq!(decrypted_len, plaintext.len());
     assert_eq!(&buffer[..decrypted_len], plaintext);
+}
+
+fn roundtrip(cipher: Cipher) {
+    let aead = make_aead(cipher);
+    let mut buf = &mut [0u8; 1024][..];
+
+    let ct = aead.encrypt(42, AAD, PLAINTEXT, &mut buf).expect("encrypt");
+    let pt_buf = &mut [0u8; 1024][..];
+    let pt = aead
+        .decrypt(42, AAD, ct, &mut pt_buf[..ct.len()])
+        .expect("decrypt");
+    assert_eq!(pt, PLAINTEXT);
+}
+
+#[test]
+fn roundtrip_aes256() {
+    roundtrip(TLS_AES_256_GCM_SHA384);
+}
+
+#[test]
+fn roundtrip_chacha20() {
+    roundtrip(TLS_CHACHA20_POLY1305_SHA256);
 }

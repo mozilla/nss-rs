@@ -101,7 +101,8 @@ mod recprot {
     /// # Safety
     ///
     /// `output`, `tag`, and `input` must be valid for `output_max`, `TAG_LEN`, and `input_len`
-    /// bytes respectively.
+    /// bytes respectively. `output` and `input` may fully overlap (in-place operation); `tag`
+    /// must not overlap with the `output` region.
     #[expect(
         clippy::too_many_arguments,
         reason = "Thin wrapper over a 14-argument C function."
@@ -123,7 +124,7 @@ mod recprot {
             PK11_AEADOp(
                 **ctx,
                 CK_GENERATOR_FUNCTION::from(CKG_NO_GENERATE),
-                0,
+                super::c_int_len(super::NONCE_LEN - super::COUNTER_LEN)?,
                 nonce.as_mut_ptr(),
                 super::c_int_len(super::NONCE_LEN)?,
                 aad.as_ptr(),
@@ -210,7 +211,12 @@ mod recprot {
             input: &[u8],
             output: &'a mut [u8],
         ) -> Res<&'a [u8]> {
-            if output.len() < input.len() + super::TAG_LEN {
+            if output.len()
+                < input
+                    .len()
+                    .checked_add(super::TAG_LEN)
+                    .ok_or(Error::IntegerOverflow)?
+            {
                 return Err(Error::from(SEC_ERROR_BAD_DATA));
             }
             let out_len = unsafe {
@@ -227,7 +233,7 @@ mod recprot {
                 )
             }?;
             debug_assert_eq!(out_len, input.len());
-            Ok(&output[..input.len() + super::TAG_LEN])
+            Ok(&output[..out_len + super::TAG_LEN])
         }
 
         /// Encrypt plaintext in place with associated data.
@@ -277,6 +283,8 @@ mod recprot {
             if output.len() < ct_len {
                 return Err(Error::from(SEC_ERROR_BAD_DATA));
             }
+            let mut tag = [0u8; super::TAG_LEN];
+            tag.copy_from_slice(&input[ct_len..]);
             let out_len = unsafe {
                 aead_op(
                     &self.ctx_decrypt,
@@ -284,8 +292,8 @@ mod recprot {
                     count,
                     aad,
                     output.as_mut_ptr(),
-                    ct_len,
-                    input.as_ptr().add(ct_len).cast_mut(),
+                    output.len(),
+                    tag.as_mut_ptr(),
                     input.as_ptr(),
                     ct_len,
                 )
@@ -311,7 +319,7 @@ mod recprot {
                     count,
                     aad,
                     data_ptr,
-                    ct_len,
+                    data.len(),
                     data_ptr.add(ct_len),
                     data_ptr.cast_const(),
                     ct_len,
