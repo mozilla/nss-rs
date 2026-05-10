@@ -30,6 +30,7 @@ pub mod hmac;
 pub mod p11;
 pub mod pbkdf2;
 pub mod pk11_utils;
+pub mod secmod;
 mod prio;
 mod replay;
 mod secrets;
@@ -68,8 +69,9 @@ pub use self::{
     },
     err::{Error, IntoResult, PRErrorCode, Res, secstatus_to_res},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
-    p11::{PrivateKey, PublicKey, SymKey, random, randomize},
+    p11::{Certificate, PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
+    secmod::SecmodModule,
     secrets::SecretDirection,
     ssl::Opt,
     util::*,

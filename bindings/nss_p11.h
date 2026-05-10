@@ -8,4 +8,5 @@
 #include "keyhi.h"
 #include "pk11pub.h"
 #include "pkcs11t.h"
+#include "secmod.h"
 #include "secoid.h"
