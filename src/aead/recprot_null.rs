@@ -76,7 +76,6 @@ impl RecordProtection {
     /// # Errors
     ///
     /// Returns `Error` when encryption fails.
-    #[expect(clippy::unnecessary_wraps)]
     pub fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
