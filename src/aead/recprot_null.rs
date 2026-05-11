@@ -57,7 +57,6 @@ impl RecordProtection {
     /// # Errors
     ///
     /// Returns `Error` when encryption fails.
-    #[expect(clippy::unnecessary_wraps)]
     pub fn encrypt<'a>(
         &self,
         _count: u64,
@@ -66,9 +65,15 @@ impl RecordProtection {
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
         let l = input.len();
+        let total = l
+            .checked_add(self.expansion())
+            .ok_or(Error::IntegerOverflow)?;
+        if output.len() < total {
+            return Err(Error::from(SEC_ERROR_BAD_DATA));
+        }
         output[..l].copy_from_slice(input);
-        output[l..l + self.expansion()].copy_from_slice(AEAD_NULL_TAG);
-        Ok(&output[..l + self.expansion()])
+        output[l..total].copy_from_slice(AEAD_NULL_TAG);
+        Ok(&output[..total])
     }
 
     /// Encrypt plaintext in place with associated data.
