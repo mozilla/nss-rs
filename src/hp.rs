@@ -49,31 +49,19 @@ fn make_aes_ctx(key: &SymKey) -> Res<Context> {
             SECItemBorrowed::make_empty().as_ref(),
         )
     })
-    .or(Err(Error::CipherInit))
+    .map_err(|_| Error::CipherInit)
 }
 
 pub enum Key {
     /// AES-ECB header-protection context.  `PK11_CloneContext` is not supported for
-    /// AES-ECB, so we store the `SymKey` and recreate `ctx` lazily: `mask` initialises
-    /// it on first use when `ctx` is `None`.
+    /// AES-ECB, so the `SymKey` is stored alongside `ctx` to enable duplication via
+    /// `try_clone`.
     #[non_exhaustive]
-    Aes { ctx: Option<Context>, key: SymKey },
+    Aes { ctx: Context, key: SymKey },
     /// The `ChaCha20` mask invokes `PK11_Encrypt` on each call because the counter
     /// and nonce change per invocation.
     #[non_exhaustive]
     Chacha(SymKey),
-}
-
-impl Clone for Key {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Aes { key, .. } => Self::Aes {
-                ctx: None,
-                key: key.clone(),
-            },
-            Self::Chacha(k) => Self::Chacha(k.clone()),
-        }
-    }
 }
 
 impl Debug for Key {
@@ -125,7 +113,7 @@ impl Key {
 
         let res = match cipher {
             TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
-                let ctx = Some(make_aes_ctx(&key)?);
+                let ctx = make_aes_ctx(&key)?;
                 Self::Aes { ctx, key }
             }
             TLS_CHACHA20_POLY1305_SHA256 => Self::Chacha(key),
@@ -146,6 +134,22 @@ impl Key {
         }
     }
 
+    /// Duplicate this key, creating a new independent instance.
+    ///
+    /// # Errors
+    ///
+    /// Errors if NSS context creation fails for AES keys.
+    pub fn try_clone(&self) -> Res<Self> {
+        match self {
+            Self::Aes { key, .. } => {
+                let key = key.clone();
+                let ctx = make_aes_ctx(&key)?;
+                Ok(Self::Aes { ctx, key })
+            }
+            Self::Chacha(k) => Ok(Self::Chacha(k.clone())),
+        }
+    }
+
     /// Generate a header protection mask for QUIC.
     ///
     /// # Errors
@@ -154,21 +158,17 @@ impl Key {
     ///
     /// # Panics
     ///
-    /// When the mechanism for our key is not supported.
-    pub fn mask(&mut self, sample: &[u8; Self::SAMPLE_SIZE]) -> Res<[u8; Self::SAMPLE_SIZE]> {
+    /// In debug builds, if NSS returns an unexpected output length.
+    pub fn mask(&self, sample: &[u8; Self::SAMPLE_SIZE]) -> Res<[u8; Self::SAMPLE_SIZE]> {
         let mut output = [0; Self::SAMPLE_SIZE];
 
         match self {
-            Self::Aes { ctx, key } => {
-                let ctx = if let Some(c) = ctx {
-                    c
-                } else {
-                    ctx.insert(make_aes_ctx(key)?)
-                };
+            Self::Aes { ctx, .. } => {
                 let mut output_len: c_int = 0;
-                // SAFETY: `Deref` on `Context` yields a copy of the raw `*mut PK11Context`;
-                // no Rust reference to the pointee is created, and `&mut self` guarantees
-                // exclusive access to this `Key`.
+                // SAFETY: `Deref` on `Context` copies the raw `*mut PK11Context` pointer
+                // value; no Rust reference to the pointee is created.  `Key` contains raw
+                // pointers (`!Sync`), so concurrent invocations are impossible, and
+                // AES-ECB full-block operations retain no inter-call state in the context.
                 secstatus_to_res(unsafe {
                     PK11_CipherOp(
                         **ctx,
