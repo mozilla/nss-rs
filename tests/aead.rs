@@ -137,20 +137,8 @@ fn aead_encrypt_in_place_too_small_buffer() {
 }
 
 #[test]
-fn encrypt_decrypt_in_place() {
-    let aead = make_aead(TLS_AES_128_GCM_SHA256);
-
-    let plaintext = b"hello world";
-    let mut buffer = Vec::from(plaintext);
-    buffer.resize(plaintext.len() + aead.expansion(), 0);
-
-    let encrypted_len = aead.encrypt_in_place(0, b"aad", &mut buffer).unwrap();
-    assert_eq!(encrypted_len, plaintext.len() + aead.expansion());
-    assert_eq!(encrypted_len, buffer.len());
-
-    let decrypted_len = aead.decrypt_in_place(0, b"aad", &mut buffer).unwrap();
-    assert_eq!(decrypted_len, plaintext.len());
-    assert_eq!(&buffer[..decrypted_len], plaintext);
+fn roundtrip_aes128() {
+    roundtrip(TLS_AES_128_GCM_SHA256);
 }
 
 fn roundtrip(cipher: Cipher) {
@@ -166,9 +154,13 @@ fn roundtrip(cipher: Cipher) {
 
     let mut ip_buf = Vec::from(PLAINTEXT);
     ip_buf.resize(PLAINTEXT.len() + aead.expansion(), 0);
-    let enc_len = aead.encrypt_in_place(42, AAD, &mut ip_buf).unwrap();
+    let enc_len = aead
+        .encrypt_in_place(42, AAD, &mut ip_buf)
+        .expect("encrypt_in_place");
     assert_eq!(enc_len, ip_buf.len());
-    let dec_len = aead.decrypt_in_place(42, AAD, &mut ip_buf).unwrap();
+    let dec_len = aead
+        .decrypt_in_place(42, AAD, &mut ip_buf)
+        .expect("decrypt_in_place");
     assert_eq!(&ip_buf[..dec_len], PLAINTEXT);
 }
 
