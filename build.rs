@@ -229,6 +229,9 @@ fn dynamic_link() {
     for lib in dynamic_libs {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
+    if env::var("CARGO_FEATURE_BLAPI").is_ok() {
+        println!("cargo:rustc-link-lib=dylib=freebl3");
+    }
 }
 
 fn static_link() {
@@ -396,17 +399,37 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
     let cfg_str = String::from_utf8(cfg)?;
 
     let mut flags: Vec<String> = Vec::new();
+    let mut lib_dirs: Vec<PathBuf> = Vec::new();
 
     for f in cfg_str.split_whitespace() {
         if f.starts_with("-I") {
             flags.push(String::from(f));
         } else if let Some(path) = f.strip_prefix("-L") {
             println!("cargo:rustc-link-search=native={path}");
+            lib_dirs.push(PathBuf::from(path));
         } else if let Some(lib) = f.strip_prefix("-l") {
             println!("cargo:rustc-link-lib=dylib={lib}");
         } else {
             println!("cargo:warning=Unknown flag from pkg-config: {f}");
         }
+    }
+
+    if env::var("CARGO_FEATURE_BLAPI").is_ok() {
+        let dylib_ext = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        if !lib_dirs
+            .iter()
+            .any(|dir| dir.join(format!("libfreebl3.{dylib_ext}")).exists())
+        {
+            panic!(
+                "blapi feature requires libfreebl3.{dylib_ext} in the pkg-config \
+                 library paths. Set NSS_DIR to a standalone NSS source build."
+            );
+        }
+        println!("cargo:rustc-link-lib=dylib=freebl3");
     }
 
     Ok(flags)

@@ -19,6 +19,8 @@ mod err;
 #[macro_use]
 mod exp;
 pub mod ext;
+#[cfg(all(not(feature = "disable-encryption"), feature = "blapi"))]
+pub(crate) mod freebl;
 pub mod hkdf;
 pub mod hp;
 
@@ -53,7 +55,7 @@ mod _link_anchor {
 }
 
 pub use self::{
-    aead::RecordProtection,
+    aead::{Mode, RecordProtection, RecordProtectionOps},
     agent::{
         Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken,
         SecretAgent, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttCheckResult,

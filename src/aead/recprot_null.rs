@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use super::{Mode, RecordProtectionOps, split_tag};
 use crate::{Cipher, Error, Res, SymKey, Version, err::sec::SEC_ERROR_BAD_DATA};
 
 pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
@@ -13,20 +14,13 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct RecordProtection {}
 
 impl RecordProtection {
-    fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-        if input.len() < self.expansion() {
-            return Err(Error::from(SEC_ERROR_BAD_DATA));
-        }
-
-        let len_encrypted = input
-            .len()
-            .checked_sub(self.expansion())
-            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
+    fn decrypt_check(_count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
+        let (len_encrypted, tag) = split_tag(input)?;
         // Check that:
         // 1) expansion is all zeros and
         // 2) if the encrypted data is also supplied that at least some values are no zero
         //    (otherwise padding will be interpreted as a valid packet)
-        if &input[len_encrypted..] == AEAD_NULL_TAG
+        if tag.as_slice() == AEAD_NULL_TAG
             && (len_encrypted == 0 || input[..len_encrypted].iter().any(|x| *x != 0x0))
         {
             Ok(len_encrypted)
@@ -40,24 +34,27 @@ impl RecordProtection {
     /// # Errors
     ///
     /// Returns `Error` when the underlying crypto operations fail.
-    #[expect(clippy::missing_const_for_fn, clippy::unnecessary_wraps)]
-    pub fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "uniform interface with other backends"
+    )]
+    pub const fn new(
+        _version: Version,
+        _cipher: Cipher,
+        _secret: &SymKey,
+        _prefix: &str,
+        _mode: Mode,
+    ) -> Res<Self> {
         Ok(Self {})
     }
+}
 
-    /// Get the expansion size (authentication tag length) for this AEAD.
-    #[must_use]
-    #[expect(clippy::missing_const_for_fn, clippy::unused_self)]
-    pub fn expansion(&self) -> usize {
+impl RecordProtectionOps for RecordProtection {
+    fn expansion(&self) -> usize {
         AEAD_NULL_TAG.len()
     }
 
-    /// Encrypt plaintext with associated data.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error` when encryption fails.
-    pub fn encrypt<'a>(
+    fn encrypt<'a>(
         &self,
         _count: u64,
         _aad: &[u8],
@@ -76,12 +73,7 @@ impl RecordProtection {
         Ok(&output[..total])
     }
 
-    /// Encrypt plaintext in place with associated data.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error` when encryption fails.
-    pub fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
+    fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -90,35 +82,21 @@ impl RecordProtection {
         Ok(data.len())
     }
 
-    /// Decrypt ciphertext with associated data.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error` when decryption or authentication fails.
-    pub fn decrypt<'a>(
+    fn decrypt<'a>(
         &self,
         count: u64,
         aad: &[u8],
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        self.decrypt_check(count, aad, input).map(|len| {
+        Self::decrypt_check(count, aad, input).map(|len| {
             output[..len].copy_from_slice(&input[..len]);
             &output[..len]
         })
     }
 
-    /// Decrypt ciphertext in place with associated data.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error` when decryption or authentication fails.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "Copy encryption enabled API"
-    )]
-    pub fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-        self.decrypt_check(count, aad, data)
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
+        Self::decrypt_check(count, aad, data)
     }
 }
 
@@ -131,7 +109,7 @@ impl fmt::Debug for RecordProtection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{AEAD_NULL_TAG, RecordProtection};
+    use super::{AEAD_NULL_TAG, RecordProtection, RecordProtectionOps};
 
     fn aead() -> RecordProtection {
         RecordProtection {}

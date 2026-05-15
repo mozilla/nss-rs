@@ -4,6 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(not(feature = "disable-encryption"))]
+use std::os::raw::{c_char, c_uint};
+#[cfg(not(feature = "disable-encryption"))]
+use std::ptr::null;
 use std::{os::raw::c_int, ptr::null_mut};
 
 #[cfg(feature = "disable-encryption")]
@@ -11,8 +15,9 @@ pub use recprot::AEAD_NULL_TAG;
 pub use recprot::RecordProtection;
 
 use crate::{
-    SECItemBorrowed, SymKey,
-    err::{Error, Res},
+    Cipher, SECItemBorrowed, SymKey,
+    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     p11::{
         self, CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE, CKA_DECRYPT,
         CKA_ENCRYPT, CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM,
@@ -20,10 +25,122 @@ use crate::{
     },
     secstatus_to_res,
 };
+#[cfg(not(feature = "disable-encryption"))]
+use crate::{
+    Version,
+    hp::SSL_HkdfExpandLabelWithMech,
+    p11::{CKM_HKDF_DATA, PK11SymKey},
+};
+
+#[cfg(all(feature = "blapi", feature = "disable-encryption"))]
+compile_error!("`blapi` and `disable-encryption` are mutually exclusive features");
+
+/// Shared API contract for all `RecordProtection` backends.
+///
+/// Implemented by each cfg-selected `recprot*.rs` backend so that a
+/// signature change in one backend is caught at compile time across all.
+/// Import this trait to call AEAD methods on `RecordProtection`.
+pub trait RecordProtectionOps {
+    /// Get the expansion size (authentication tag length) for this AEAD.
+    #[must_use]
+    fn expansion(&self) -> usize;
+
+    /// Encrypt plaintext with associated data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error` when encryption fails.
+    fn encrypt<'a>(
+        &self,
+        count: u64,
+        aad: &[u8],
+        input: &[u8],
+        output: &'a mut [u8],
+    ) -> Res<&'a [u8]>;
+
+    /// Encrypt plaintext in place with associated data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error` when encryption fails.
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
+
+    /// Decrypt ciphertext with associated data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error` when decryption or authentication fails.
+    fn decrypt<'a>(
+        &self,
+        count: u64,
+        aad: &[u8],
+        input: &[u8],
+        output: &'a mut [u8],
+    ) -> Res<&'a [u8]>;
+
+    /// Decrypt ciphertext in place with associated data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error` when decryption or authentication fails.
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize>;
+}
 
 #[cfg_attr(feature = "disable-encryption", path = "recprot_null.rs")]
-#[cfg_attr(not(feature = "disable-encryption"), path = "recprot.rs")]
+#[cfg_attr(
+    all(not(feature = "disable-encryption"), feature = "blapi"),
+    path = "recprot_blapi.rs"
+)]
+#[cfg_attr(
+    all(not(feature = "disable-encryption"), not(feature = "blapi")),
+    path = "recprot.rs"
+)]
 mod recprot;
+
+#[cfg(not(feature = "disable-encryption"))]
+fn expand_label(
+    version: Version,
+    cipher: Cipher,
+    secret: &SymKey,
+    label: &str,
+    mech: CK_MECHANISM_TYPE,
+    key_len: c_uint,
+) -> Res<SymKey> {
+    let mut ptr: *mut PK11SymKey = null_mut();
+    unsafe {
+        SSL_HkdfExpandLabelWithMech(
+            version,
+            cipher,
+            **secret,
+            null(),
+            0,
+            label.as_ptr().cast::<c_char>(),
+            c_uint::try_from(label.len())?,
+            mech,
+            key_len,
+            &raw mut ptr,
+        )
+    }?;
+    SymKey::from_ptr(ptr)
+}
+
+#[cfg(not(feature = "disable-encryption"))]
+fn expand_hkdf_label(
+    version: Version,
+    cipher: Cipher,
+    secret: &SymKey,
+    label: &str,
+    key_len: c_uint,
+) -> Res<SymKey> {
+    expand_label(
+        version,
+        cipher,
+        secret,
+        label,
+        CK_MECHANISM_TYPE::from(CKM_HKDF_DATA),
+        key_len,
+    )
+}
 
 /// All the nonces are the same length.  Exploit that.
 pub const NONCE_LEN: usize = 12;
@@ -45,6 +162,18 @@ fn xor_nonce(base: &[u8; NONCE_LEN], count: SequenceNumber) -> [u8; NONCE_LEN] {
 /// The NSS API insists on us identifying the tag separately, which is awful.
 /// All of the AEAD functions here have a tag of this length, so use a fixed offset.
 const TAG_LEN: usize = 16;
+
+/// Split `data` into `(ct_len, tag)`, returning `SEC_ERROR_BAD_DATA` if it is
+/// too short to contain a tag.
+fn split_tag(data: &[u8]) -> Res<(usize, [u8; TAG_LEN])> {
+    let ct_len = data
+        .len()
+        .checked_sub(TAG_LEN)
+        .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
+    let mut tag = [0u8; TAG_LEN];
+    tag.copy_from_slice(&data[ct_len..]);
+    Ok((ct_len, tag))
+}
 
 pub type SequenceNumber = u64;
 
@@ -82,6 +211,36 @@ pub enum AeadAlgorithms {
     ChaCha20Poly1305,
 }
 
+impl AeadAlgorithms {
+    #[must_use]
+    pub const fn key_len(self) -> usize {
+        match self {
+            Self::Aes128Gcm => 16,
+            Self::Aes256Gcm | Self::ChaCha20Poly1305 => 32,
+        }
+    }
+
+    #[must_use]
+    pub fn p11_mech(self) -> CK_MECHANISM_TYPE {
+        CK_MECHANISM_TYPE::from(match self {
+            Self::Aes128Gcm | Self::Aes256Gcm => CKM_AES_GCM,
+            Self::ChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
+        })
+    }
+}
+
+impl TryFrom<Cipher> for AeadAlgorithms {
+    type Error = Error;
+    fn try_from(cipher: Cipher) -> Res<Self> {
+        match cipher {
+            TLS_AES_128_GCM_SHA256 => Ok(Self::Aes128Gcm),
+            TLS_AES_256_GCM_SHA384 => Ok(Self::Aes256Gcm),
+            TLS_CHACHA20_POLY1305_SHA256 => Ok(Self::ChaCha20Poly1305),
+            _ => Err(Error::UnsupportedCipher),
+        }
+    }
+}
+
 pub struct Aead {
     mode: Mode,
     ctx: Context,
@@ -89,13 +248,6 @@ pub struct Aead {
 }
 
 impl Aead {
-    fn mech(algorithm: AeadAlgorithms) -> CK_MECHANISM_TYPE {
-        CK_MECHANISM_TYPE::from(match algorithm {
-            AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => CKM_AES_GCM,
-            AeadAlgorithms::ChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
-        })
-    }
-
     pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
         let slot = p11::Slot::internal().map_err(|_| Error::Internal)?;
 
@@ -105,7 +257,7 @@ impl Aead {
         let ptr = unsafe {
             p11::PK11_ImportSymKey(
                 *slot,
-                Self::mech(algorithm),
+                algorithm.p11_mech(),
                 p11::PK11Origin::PK11_OriginUnwrap,
                 CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT | CKA_DECRYPT),
                 key_item_ptr,
@@ -125,7 +277,7 @@ impl Aead {
 
         let ptr = unsafe {
             PK11_CreateContextBySymKey(
-                Self::mech(algorithm),
+                algorithm.p11_mech(),
                 mode.p11mode(),
                 **key,
                 SECItemBorrowed::wrap(&nonce_base[..])?.as_ref(),

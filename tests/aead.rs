@@ -7,7 +7,7 @@
 #![cfg(not(feature = "disable-encryption"))]
 
 use nss_rs::{
-    RecordProtection,
+    Mode, RecordProtection, RecordProtectionOps as _,
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
         TLS_VERSION_1_3,
@@ -30,10 +30,9 @@ const PLAINTEXT: &[u8] = &[
     0x03, 0x04,
 ];
 
-fn make_aead(cipher: Cipher) -> RecordProtection {
+fn make_secret() -> nss_rs::SymKey {
     fixture_init();
-
-    let secret = hkdf::import_key(
+    hkdf::import_key(
         TLS_VERSION_1_3,
         &[
             0x47, 0xb2, 0xea, 0xea, 0x6c, 0x26, 0x6e, 0x32, 0xc0, 0x69, 0x7a, 0x9e, 0x2a, 0x89,
@@ -41,22 +40,22 @@ fn make_aead(cipher: Cipher) -> RecordProtection {
             0x58, 0x1a, 0x38, 0x11,
         ],
     )
-    .expect("make a secret");
-    RecordProtection::new(
-        TLS_VERSION_1_3,
-        cipher,
-        &secret,
-        "quic ", // QUICv1 label prefix; note the trailing space here.
-    )
-    .expect("can make an AEAD")
+    .expect("make a secret")
+}
+
+fn make_aead(cipher: Cipher, mode: Mode) -> RecordProtection {
+    let secret = make_secret();
+    RecordProtection::new(TLS_VERSION_1_3, cipher, &secret, "quic ", mode) // QUICv1 label prefix; note the trailing space here.
+        .expect("can make an AEAD")
 }
 
 #[test]
 fn aead_encrypt_decrypt() {
     const TOGGLE: u8 = 77;
-    let aead = make_aead(TLS_AES_128_GCM_SHA256);
+    let enc = make_aead(TLS_AES_128_GCM_SHA256, Mode::Encrypt);
+    let dec = make_aead(TLS_AES_128_GCM_SHA256, Mode::Decrypt);
     let ciphertext_buf = &mut [0; 1024]; // Can't use PLAINTEXT.len() here.
-    let ciphertext = aead
+    let ciphertext = enc
         .encrypt(1, AAD, PLAINTEXT, ciphertext_buf)
         .expect("encrypt should work");
     let expected_ciphertext: &[u8] = &[
@@ -72,23 +71,23 @@ fn aead_encrypt_decrypt() {
     assert_eq!(ciphertext, expected_ciphertext);
 
     let plaintext_buf = &mut [0; 1024]; // Can't use PLAINTEXT.len() here.
-    let plaintext = aead
+    let plaintext = dec
         .decrypt(1, AAD, ciphertext, plaintext_buf)
         .expect("decrypt should also work");
     assert_eq!(plaintext, PLAINTEXT);
 
     // Decryption failures...
     // Different counter.
-    let res = aead.decrypt(2, AAD, ciphertext, plaintext_buf);
+    let res = dec.decrypt(2, AAD, ciphertext, plaintext_buf);
     assert!(res.is_err());
 
     // Front-truncate ciphertext.
-    let res = aead.decrypt(1, AAD, &ciphertext[1..], plaintext_buf);
+    let res = dec.decrypt(1, AAD, &ciphertext[1..], plaintext_buf);
     assert!(res.is_err());
 
     // End-truncate ciphertext.
     let ciphertext_last = ciphertext.len() - 1;
-    let res = aead.decrypt(1, AAD, &ciphertext[..ciphertext_last], plaintext_buf);
+    let res = dec.decrypt(1, AAD, &ciphertext[..ciphertext_last], plaintext_buf);
     assert!(res.is_err());
 
     // Mess with the buffer.
@@ -97,13 +96,13 @@ fn aead_encrypt_decrypt() {
 
     // Toggle first octet.
     scratch[0] ^= TOGGLE;
-    let res = aead.decrypt(1, AAD, &scratch[..], plaintext_buf);
+    let res = dec.decrypt(1, AAD, &scratch[..], plaintext_buf);
     assert!(res.is_err());
 
     // Toggle the auth tag.
     scratch[0] ^= TOGGLE;
     scratch[ciphertext_last] ^= TOGGLE;
-    let res = aead.decrypt(1, AAD, &scratch[..], plaintext_buf);
+    let res = dec.decrypt(1, AAD, &scratch[..], plaintext_buf);
     assert!(res.is_err());
 
     // Mess with the AAD.
@@ -111,22 +110,22 @@ fn aead_encrypt_decrypt() {
     scratch.extend_from_slice(AAD);
 
     // Front-truncate.
-    let res = aead.decrypt(1, &scratch[1..], ciphertext, plaintext_buf);
+    let res = dec.decrypt(1, &scratch[1..], ciphertext, plaintext_buf);
     assert!(res.is_err());
 
     // End-truncate.
     let aad_last = AAD.len() - 1;
-    let res = aead.decrypt(1, &scratch[..aad_last], ciphertext, plaintext_buf);
+    let res = dec.decrypt(1, &scratch[..aad_last], ciphertext, plaintext_buf);
     assert!(res.is_err());
 
     scratch[0] ^= TOGGLE;
-    let res = aead.decrypt(1, &scratch[..], ciphertext, plaintext_buf);
+    let res = dec.decrypt(1, &scratch[..], ciphertext, plaintext_buf);
     assert!(res.is_err());
 }
 
 #[test]
 fn aead_encrypt_in_place_too_small_buffer() {
-    let aead = make_aead(TLS_AES_128_GCM_SHA256);
+    let aead = make_aead(TLS_AES_128_GCM_SHA256, Mode::Encrypt);
 
     // Create a buffer that's smaller than the expansion size
     let mut small_buffer = vec![0u8; aead.expansion() - 1];
@@ -141,26 +140,23 @@ fn roundtrip_aes128() {
 }
 
 fn roundtrip(cipher: Cipher) {
-    let aead = make_aead(cipher);
-    let buf = &mut [0u8; 1024][..];
+    let enc = make_aead(cipher, Mode::Encrypt);
+    let dec = make_aead(cipher, Mode::Decrypt);
 
-    let ct = aead.encrypt(42, AAD, PLAINTEXT, buf).expect("encrypt");
+    let ct_buf = &mut [0u8; 1024][..];
+    let ct = enc.encrypt(7, AAD, PLAINTEXT, ct_buf).expect("encrypt");
     let pt_buf = &mut [0u8; 1024][..];
-    let pt = aead
-        .decrypt(42, AAD, ct, &mut pt_buf[..ct.len()])
-        .expect("decrypt");
+    let pt = dec.decrypt(7, AAD, ct, pt_buf).expect("decrypt");
     assert_eq!(pt, PLAINTEXT);
 
-    let mut ip_buf = Vec::from(PLAINTEXT);
-    ip_buf.resize(PLAINTEXT.len() + aead.expansion(), 0);
-    let enc_len = aead
-        .encrypt_in_place(42, AAD, &mut ip_buf)
+    let mut ip = Vec::from(PLAINTEXT);
+    ip.resize(PLAINTEXT.len() + enc.expansion(), 0);
+    enc.encrypt_in_place(8, AAD, &mut ip)
         .expect("encrypt_in_place");
-    assert_eq!(enc_len, ip_buf.len());
-    let dec_len = aead
-        .decrypt_in_place(42, AAD, &mut ip_buf)
+    let dec_len = dec
+        .decrypt_in_place(8, AAD, &mut ip)
         .expect("decrypt_in_place");
-    assert_eq!(&ip_buf[..dec_len], PLAINTEXT);
+    assert_eq!(&ip[..dec_len], PLAINTEXT);
 }
 
 #[test]

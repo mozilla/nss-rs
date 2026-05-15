@@ -1,6 +1,6 @@
 [package]
 name = "nss-rs"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Martin Thomson <mt@lowentropy.net>", "Andy Leiserson <aleiserson@mozilla.com>", "John M. Schanck <jschanck@mozilla.com>", "Benjamin Beurdouche <beurdouche@mozilla.com>", "Anna Weine <anna.weine@mozilla.com>"]
 categories = ["network-programming", "web-programming"]
 keywords = ["nss", "crypto", "mozilla", "firefox"]
@@ -124,6 +124,9 @@ verbose_file_reads = "warn"
 
 [features]
 bench = ["log/release_max_level_info"]
+# Bypass PKCS#11 session layer for RecordProtection AEAD operations by calling
+# freebl directly. Improves performance but skips softoken's FIPS self-test gate.
+blapi = []
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
