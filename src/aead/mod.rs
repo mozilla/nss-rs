@@ -21,444 +21,26 @@ use crate::{
     secstatus_to_res,
 };
 
-#[cfg(not(feature = "disable-encryption"))]
-mod recprot {
-    use std::{
-        fmt,
-        os::raw::{c_char, c_uint},
-        ptr::null_mut,
-    };
-
-    use crate::{
-        Cipher, Error, Res, SymKey, Version,
-        err::sec::SEC_ERROR_BAD_DATA,
-        p11::PK11SymKey,
-        ssl::{PRUint8, PRUint16, PRUint64, SSLAeadContext},
-    };
-
-    experimental_api!(SSL_MakeAead(
-        version: PRUint16,
-        cipher: PRUint16,
-        secret: *mut PK11SymKey,
-        label_prefix: *const c_char,
-        label_prefix_len: c_uint,
-        ctx: *mut *mut SSLAeadContext,
-    ));
-
-    experimental_api!(SSL_AeadEncrypt(
-        ctx: *const SSLAeadContext,
-        counter: PRUint64,
-        aad: *const PRUint8,
-        aad_len: c_uint,
-        input: *const PRUint8,
-        input_len: c_uint,
-        output: *const PRUint8,
-        output_len: *mut c_uint,
-        max_output: c_uint
-    ));
-
-    experimental_api!(SSL_AeadDecrypt(
-        ctx: *const SSLAeadContext,
-        counter: PRUint64,
-        aad: *const PRUint8,
-        aad_len: c_uint,
-        input: *const PRUint8,
-        input_len: c_uint,
-        output: *const PRUint8,
-        output_len: *mut c_uint,
-        max_output: c_uint
-    ));
-    experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext));
-    scoped_ptr!(AeadContext, SSLAeadContext, SSL_DestroyAead);
-
-    pub struct RecordProtection {
-        ctx: AeadContext,
-    }
-
-    impl RecordProtection {
-        unsafe fn from_raw(
-            version: Version,
-            cipher: Cipher,
-            secret: *mut PK11SymKey,
-            prefix: &str,
-        ) -> Res<Self> {
-            let p = prefix.as_bytes();
-            let mut ctx: *mut SSLAeadContext = null_mut();
-            unsafe {
-                SSL_MakeAead(
-                    version,
-                    cipher,
-                    secret,
-                    p.as_ptr().cast(),
-                    c_uint::try_from(p.len())?,
-                    &raw mut ctx,
-                )?;
-            }
-            Ok(Self {
-                ctx: AeadContext::from_ptr(ctx)?,
-            })
-        }
-
-        /// Create a new AEAD instance.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when the underlying crypto operations fail.
-        pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
-            let s: *mut PK11SymKey = **secret;
-            unsafe { Self::from_raw(version, cipher, s, prefix) }
-        }
-
-        /// Get the expansion size (authentication tag length) for this AEAD.
-        #[must_use]
-        #[expect(clippy::missing_const_for_fn, clippy::unused_self)]
-        pub fn expansion(&self) -> usize {
-            16
-        }
-
-        /// Encrypt plaintext with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when encryption fails.
-        pub fn encrypt<'a>(
-            &self,
-            count: u64,
-            aad: &[u8],
-            input: &[u8],
-            output: &'a mut [u8],
-        ) -> Res<&'a [u8]> {
-            let mut l: c_uint = 0;
-            unsafe {
-                SSL_AeadEncrypt(
-                    *self.ctx,
-                    count,
-                    aad.as_ptr(),
-                    c_uint::try_from(aad.len())?,
-                    input.as_ptr(),
-                    c_uint::try_from(input.len())?,
-                    output.as_mut_ptr(),
-                    &raw mut l,
-                    c_uint::try_from(output.len())?,
-                )
-            }?;
-            Ok(&output[..l.try_into()?])
-        }
-
-        /// Encrypt plaintext in place with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when encryption fails.
-        pub fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-            if data.len() < self.expansion() {
-                return Err(Error::from(SEC_ERROR_BAD_DATA));
-            }
-
-            let mut l: c_uint = 0;
-            unsafe {
-                SSL_AeadEncrypt(
-                    *self.ctx,
-                    count,
-                    aad.as_ptr(),
-                    c_uint::try_from(aad.len())?,
-                    data.as_ptr(),
-                    c_uint::try_from(data.len() - self.expansion())?,
-                    data.as_mut_ptr(),
-                    &raw mut l,
-                    c_uint::try_from(data.len())?,
-                )
-            }?;
-            debug_assert_eq!(usize::try_from(l)?, data.len());
-            Ok(data.len())
-        }
-
-        /// Decrypt ciphertext with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when decryption or authentication fails.
-        pub fn decrypt<'a>(
-            &self,
-            count: u64,
-            aad: &[u8],
-            input: &[u8],
-            output: &'a mut [u8],
-        ) -> Res<&'a [u8]> {
-            let mut l: c_uint = 0;
-            unsafe {
-                // Note that NSS insists upon having extra space available for decryption, so
-                // the buffer for `output` should be the same length as `input`, even though
-                // the final result will be shorter.
-                SSL_AeadDecrypt(
-                    *self.ctx,
-                    count,
-                    aad.as_ptr(),
-                    c_uint::try_from(aad.len())?,
-                    input.as_ptr(),
-                    c_uint::try_from(input.len())?,
-                    output.as_mut_ptr(),
-                    &raw mut l,
-                    c_uint::try_from(output.len())?,
-                )
-            }?;
-            Ok(&output[..l.try_into()?])
-        }
-
-        /// Decrypt ciphertext in place with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when decryption or authentication fails.
-        pub fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-            let mut l: c_uint = 0;
-            unsafe {
-                // Note that NSS insists upon having extra space available for decryption, so
-                // the buffer for `output` should be the same length as `input`, even though
-                // the final result will be shorter.
-                SSL_AeadDecrypt(
-                    *self.ctx,
-                    count,
-                    aad.as_ptr(),
-                    c_uint::try_from(aad.len())?,
-                    data.as_ptr(),
-                    c_uint::try_from(data.len())?,
-                    data.as_mut_ptr(),
-                    &raw mut l,
-                    c_uint::try_from(data.len())?,
-                )
-            }?;
-            debug_assert_eq!(usize::try_from(l)?, data.len() - self.expansion());
-            Ok(l.try_into()?)
-        }
-    }
-
-    impl fmt::Debug for RecordProtection {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "[AEAD Context]")
-        }
-    }
-}
-
-#[cfg(feature = "disable-encryption")]
-mod recprot {
-    use std::fmt;
-
-    use crate::{Cipher, Error, Res, SymKey, Version, err::sec::SEC_ERROR_BAD_DATA};
-
-    pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
-
-    pub struct RecordProtection {}
-
-    impl RecordProtection {
-        fn decrypt_check(&self, _count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-            if input.len() < self.expansion() {
-                return Err(Error::from(SEC_ERROR_BAD_DATA));
-            }
-
-            let len_encrypted = input
-                .len()
-                .checked_sub(self.expansion())
-                .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
-            // Check that:
-            // 1) expansion is all zeros and
-            // 2) if the encrypted data is also supplied that at least some values are no zero
-            //    (otherwise padding will be interpreted as a valid packet)
-            if &input[len_encrypted..] == AEAD_NULL_TAG
-                && (len_encrypted == 0 || input[..len_encrypted].iter().any(|x| *x != 0x0))
-            {
-                Ok(len_encrypted)
-            } else {
-                Err(Error::from(SEC_ERROR_BAD_DATA))
-            }
-        }
-
-        /// Create a new AEAD instance.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when the underlying crypto operations fail.
-        #[expect(clippy::missing_const_for_fn, clippy::unnecessary_wraps)]
-        pub fn new(
-            _version: Version,
-            _cipher: Cipher,
-            _secret: &SymKey,
-            _prefix: &str,
-        ) -> Res<Self> {
-            Ok(Self {})
-        }
-
-        /// Get the expansion size (authentication tag length) for this AEAD.
-        #[must_use]
-        #[expect(clippy::missing_const_for_fn, clippy::unused_self)]
-        pub fn expansion(&self) -> usize {
-            AEAD_NULL_TAG.len()
-        }
-
-        /// Encrypt plaintext with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when encryption fails.
-        #[expect(clippy::unnecessary_wraps)]
-        pub fn encrypt<'a>(
-            &self,
-            _count: u64,
-            _aad: &[u8],
-            input: &[u8],
-            output: &'a mut [u8],
-        ) -> Res<&'a [u8]> {
-            let l = input.len();
-            output[..l].copy_from_slice(input);
-            output[l..l + self.expansion()].copy_from_slice(AEAD_NULL_TAG);
-            Ok(&output[..l + self.expansion()])
-        }
-
-        /// Encrypt plaintext in place with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when encryption fails.
-        #[expect(clippy::unnecessary_wraps)]
-        pub fn encrypt_in_place(&self, _count: u64, _aad: &[u8], data: &mut [u8]) -> Res<usize> {
-            let pos = data.len() - self.expansion();
-            data[pos..].copy_from_slice(AEAD_NULL_TAG);
-            Ok(data.len())
-        }
-
-        /// Decrypt ciphertext with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when decryption or authentication fails.
-        pub fn decrypt<'a>(
-            &self,
-            count: u64,
-            aad: &[u8],
-            input: &[u8],
-            output: &'a mut [u8],
-        ) -> Res<&'a [u8]> {
-            self.decrypt_check(count, aad, input).map(|len| {
-                output[..len].copy_from_slice(&input[..len]);
-                &output[..len]
-            })
-        }
-
-        /// Decrypt ciphertext in place with associated data.
-        ///
-        /// # Errors
-        ///
-        /// Returns `Error` when decryption or authentication fails.
-        #[expect(
-            clippy::needless_pass_by_ref_mut,
-            reason = "Copy encryption enabled API"
-        )]
-        pub fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-            self.decrypt_check(count, aad, data)
-        }
-    }
-
-    impl fmt::Debug for RecordProtection {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "[NULL AEAD]")
-        }
-    }
-
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    mod tests {
-        use super::{AEAD_NULL_TAG, RecordProtection};
-
-        fn aead() -> RecordProtection {
-            RecordProtection {}
-        }
-
-        #[test]
-        fn expansion() {
-            assert_eq!(aead().expansion(), AEAD_NULL_TAG.len());
-        }
-
-        #[test]
-        fn debug() {
-            assert_eq!(format!("{:?}", aead()), "[NULL AEAD]");
-        }
-
-        #[test]
-        fn encrypt_decrypt_roundtrip() {
-            let a = aead();
-            let plaintext = b"hello world";
-            let mut out = vec![0u8; plaintext.len() + a.expansion()];
-            let encrypted = a.encrypt(0, b"aad", plaintext, &mut out).unwrap();
-            assert_eq!(encrypted.len(), plaintext.len() + a.expansion());
-            assert_eq!(&encrypted[..plaintext.len()], plaintext);
-            assert_eq!(&encrypted[plaintext.len()..], AEAD_NULL_TAG);
-
-            let mut dec_out = vec![0u8; plaintext.len()];
-            let decrypted = a.decrypt(0, b"aad", encrypted, &mut dec_out).unwrap();
-            assert_eq!(decrypted, plaintext);
-        }
-
-        #[test]
-        fn encrypt_in_place_roundtrip() {
-            let a = aead();
-            let plaintext = b"hello";
-            let mut buf = plaintext.to_vec();
-            buf.resize(plaintext.len() + a.expansion(), 0);
-            let len = a.encrypt_in_place(0, b"", &mut buf).unwrap();
-            assert_eq!(len, buf.len());
-            assert_eq!(&buf[plaintext.len()..], AEAD_NULL_TAG);
-
-            let dec_len = a.decrypt_in_place(0, b"", &mut buf).unwrap();
-            assert_eq!(dec_len, plaintext.len());
-            assert_eq!(&buf[..dec_len], plaintext);
-        }
-
-        #[test]
-        fn decrypt_empty_plaintext() {
-            // Zero-length plaintext (just the tag) is valid.
-            let a = aead();
-            let mut out = vec![0u8; a.expansion()];
-            a.encrypt(0, b"", b"", &mut out).unwrap();
-            let mut dec = vec![];
-            let res = a.decrypt(0, b"", &out, &mut dec).unwrap();
-            assert_eq!(res, b"");
-        }
-
-        #[test]
-        fn decrypt_fails_too_short() {
-            let a = aead();
-            let short = &AEAD_NULL_TAG[..a.expansion() - 1];
-            assert!(a.decrypt(0, b"", short, &mut []).is_err());
-        }
-
-        #[test]
-        fn decrypt_fails_bad_tag() {
-            let a = aead();
-            let plaintext = b"test";
-            let mut buf = vec![0u8; plaintext.len() + a.expansion()];
-            a.encrypt(0, b"", plaintext, &mut buf).unwrap();
-            // Corrupt the tag.
-            let tag_start = plaintext.len();
-            buf[tag_start] ^= 0xff;
-            assert!(a.decrypt(0, b"", &buf, &mut []).is_err());
-        }
-
-        #[test]
-        fn decrypt_rejects_all_zero_data_bytes() {
-            // All-zero plaintext with correct tag should fail (looks like padding).
-            let a = aead();
-            let mut buf = vec![0u8; 4 + a.expansion()];
-            buf[4..].copy_from_slice(AEAD_NULL_TAG);
-            assert!(a.decrypt(0, b"", &buf, &mut []).is_err());
-        }
-    }
-}
+#[cfg_attr(feature = "disable-encryption", path = "recprot_null.rs")]
+#[cfg_attr(not(feature = "disable-encryption"), path = "recprot.rs")]
+mod recprot;
 
 /// All the nonces are the same length.  Exploit that.
 pub const NONCE_LEN: usize = 12;
 
 /// The portion of the nonce that is a counter.
 const COUNTER_LEN: usize = size_of::<SequenceNumber>();
+
+fn xor_nonce(base: &[u8; NONCE_LEN], count: SequenceNumber) -> [u8; NONCE_LEN] {
+    let mut nonce = *base;
+    for (n, &s) in nonce[NONCE_LEN - COUNTER_LEN..]
+        .iter_mut()
+        .zip(&count.to_be_bytes())
+    {
+        *n ^= s;
+    }
+    nonce
+}
 
 /// The NSS API insists on us identifying the tag separately, which is awful.
 /// All of the AEAD functions here have a tag of this length, so use a fixed offset.
@@ -512,15 +94,6 @@ impl Aead {
             AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => CKM_AES_GCM,
             AeadAlgorithms::ChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
         })
-    }
-
-    fn make_nonce(nonce: &mut [u8; NONCE_LEN], seq: SequenceNumber) {
-        for (n, &s) in nonce[NONCE_LEN - COUNTER_LEN..]
-            .iter_mut()
-            .zip(&seq.to_be_bytes())
-        {
-            *n ^= s;
-        }
     }
 
     pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
@@ -615,8 +188,7 @@ impl Aead {
         crate::init()?;
 
         assert_eq!(self.mode, Mode::Encrypt);
-        let mut nonce = self.nonce_base;
-        Self::make_nonce(&mut nonce, seq);
+        let mut nonce = xor_nonce(&self.nonce_base, seq);
         let mut ct = vec![0; pt.len() + TAG_LEN];
         let mut ct_len: c_int = 0;
         let mut tag = vec![0; TAG_LEN];
@@ -653,8 +225,7 @@ impl Aead {
         crate::init()?;
 
         assert_eq!(self.mode, Mode::Decrypt);
-        let mut nonce = self.nonce_base;
-        Self::make_nonce(&mut nonce, seq);
+        let mut nonce = xor_nonce(&self.nonce_base, seq);
         let mut pt = vec![0; ct.len()]; // NSS needs more space than it uses for plaintext.
         let mut pt_len: c_int = 0;
         let pt_expected = ct.len().checked_sub(TAG_LEN).ok_or(Error::AeadTruncated)?;
