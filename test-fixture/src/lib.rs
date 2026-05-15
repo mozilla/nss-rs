@@ -8,22 +8,32 @@
 
 use std::{
     cell::OnceCell,
+    path::PathBuf,
+    sync::Once,
     time::{Duration, Instant},
 };
 
-use nss_rs::{init_db, AntiReplay};
+use nss_rs::{init_db, AntiReplay, TEST_FIXTURE_DB};
 
-/// The path for the database used in tests.
+/// Returns the path to the NSS test fixture database.
 ///
-/// Initialized via the `NSS_DB_PATH` environment variable. If that is not set,
-/// it defaults to the `db` directory in the current crate. If the environment
-/// variable is set to `$ARGV0`, it will be initialized to the directory of the
-/// current executable.
-pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
-    dir
-} else {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/db")
-};
+/// Reads the `TEST_FIXTURE_DB` environment variable if set, falling back to
+/// [`TEST_FIXTURE_DB`].  If the value is `$ARGV0`, returns the directory of
+/// the current executable instead.
+#[must_use]
+pub fn db_path() -> PathBuf {
+    match std::env::var("TEST_FIXTURE_DB").as_deref() {
+        Ok("$ARGV0") => {
+            let mut exe = std::env::current_exe().unwrap();
+            exe.pop();
+            exe
+        }
+        Ok(path) => PathBuf::from(path),
+        Err(_) => PathBuf::from(TEST_FIXTURE_DB),
+    }
+}
+
+static FIXTURE_INIT: Once = Once::new();
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
@@ -34,14 +44,9 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 /// When the NSS initialization fails.
 #[allow(dead_code)]
 pub fn fixture_init() {
-    if NSS_DB_PATH == "$ARGV0" {
-        let mut current_exe = std::env::current_exe().unwrap();
-        current_exe.pop();
-        let nss_db_path = current_exe.to_str().unwrap();
-        init_db(nss_db_path).unwrap();
-    } else {
-        init_db(NSS_DB_PATH).unwrap();
-    }
+    FIXTURE_INIT.call_once(|| {
+        init_db(db_path()).unwrap();
+    });
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.

@@ -38,7 +38,6 @@ mod ssl;
 pub mod time;
 
 use std::{
-    env,
     ffi::CString,
     path::{Path, PathBuf},
     ptr::null,
@@ -189,15 +188,15 @@ pub fn init() -> Res<()> {
     res.as_ref().map(|_| ()).map_err(Clone::clone)
 }
 
+/// The path to the default NSS database used for testing.
+pub const TEST_FIXTURE_DB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixture/db");
+
 /// Initialize with a database.
 ///
 /// # Errors
 ///
 /// If NSS cannot be initialized.
 pub fn init_db<P: Into<PathBuf>>(dir: P) -> Res<()> {
-    // Allow overriding the NSS database path with an environment variable.
-    let dir =
-        env::var("NSS_DB_PATH").unwrap_or(dir.into().to_str().ok_or(Error::Internal)?.to_string());
     let res = INITIALIZED.get_or_init(|| init_once(Some(dir.into())));
     res.as_ref().map(|_| ()).map_err(Clone::clone)
 }
