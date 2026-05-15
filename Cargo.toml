@@ -124,7 +124,6 @@ verbose_file_reads = "warn"
 
 [features]
 bench = ["log/release_max_level_info"]
-deny-warnings = []
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
