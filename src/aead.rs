@@ -6,6 +6,8 @@
 
 use std::{os::raw::c_int, ptr::null_mut};
 
+#[cfg(feature = "disable-encryption")]
+pub use recprot::AEAD_NULL_TAG;
 pub use recprot::RecordProtection;
 
 use crate::{
