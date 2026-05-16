@@ -1,6 +1,6 @@
 [package]
 name = "nss-rs"
-version = "0.10.1"
+version = "0.11.0"
 authors = ["Martin Thomson <mt@lowentropy.net>", "Andy Leiserson <aleiserson@mozilla.com>", "John M. Schanck <jschanck@mozilla.com>", "Benjamin Beurdouche <beurdouche@mozilla.com>", "Anna Weine <anna.weine@mozilla.com>"]
 categories = ["network-programming", "web-programming"]
 keywords = ["nss", "crypto", "mozilla", "firefox"]
@@ -124,7 +124,6 @@ verbose_file_reads = "warn"
 
 [features]
 bench = ["log/release_max_level_info"]
-deny-warnings = []
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
