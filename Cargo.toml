@@ -99,7 +99,7 @@ verbose_file_reads = "warn"
 
 [package]
 name = "nss-rs"
-version = "0.12.0"
+version = "0.12.1"
 authors = ["Martin Thomson <mt@lowentropy.net>", "Andy Leiserson <aleiserson@mozilla.com>", "John M. Schanck <jschanck@mozilla.com>", "Benjamin Beurdouche <beurdouche@mozilla.com>", "Anna Weine <anna.weine@mozilla.com>"]
 categories = ["network-programming", "web-programming"]
 keywords = ["nss", "crypto", "mozilla", "firefox"]

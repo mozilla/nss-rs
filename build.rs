@@ -420,15 +420,31 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
         } else {
             "so"
         };
-        if !lib_dirs
-            .iter()
-            .any(|dir| dir.join(format!("libfreebl3.{dylib_ext}")).exists())
+        let freebl_lib = format!("libfreebl3.{dylib_ext}");
+
+        // pkg-config omits -L for default system library paths (e.g., /usr/lib64 on
+        // RHEL/Fedora), so also include the libdir from the .pc file.
+        if let Ok(output) = Command::new("pkg-config")
+            .args(["--variable=libdir", "nss"])
+            .output()
+            && output.status.success()
+            && let Ok(s) = String::from_utf8(output.stdout)
         {
-            panic!(
-                "blapi feature requires libfreebl3.{dylib_ext} in the pkg-config \
-                 library paths. Set NSS_DIR to a standalone NSS source build."
-            );
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                let dir = PathBuf::from(trimmed);
+                if !lib_dirs.contains(&dir) {
+                    println!("cargo:rustc-link-search=native={}", dir.display());
+                    lib_dirs.push(dir);
+                }
+            }
         }
+
+        assert!(
+            lib_dirs.iter().any(|dir| dir.join(&freebl_lib).exists()),
+            "blapi feature requires {freebl_lib} in the pkg-config \
+             library paths. Set NSS_DIR to a standalone NSS source build."
+        );
         println!("cargo:rustc-link-lib=dylib=freebl3");
     }
 

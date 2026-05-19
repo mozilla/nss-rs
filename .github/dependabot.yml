@@ -32,7 +32,7 @@ updates:
       exclude:
         - "mozilla/actions*"
   - package-ecosystem: "docker"
-    directory: "/qns"
+    directory: "/.github/workflows"
     schedule:
       interval: "weekly"
     cooldown:
