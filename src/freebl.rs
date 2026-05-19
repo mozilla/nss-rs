@@ -22,6 +22,8 @@ use std::{
     sync::OnceLock,
 };
 
+use crate::aead::Mode;
+
 // NSS_AES_GCM = 4, AES_BLOCK_SIZE = 16 (from blapit.h)
 pub const NSS_AES_GCM: c_int = 4;
 pub const AES_BLOCK_SIZE: c_uint = 16;
@@ -235,12 +237,11 @@ pub unsafe fn ChaCha20Poly1305_CreateContext(
 
 /// Returns the encrypt or decrypt function pointer for ChaCha20-Poly1305.
 /// The caller stores this at construction time to bake in the direction.
-pub fn chacha20_poly1305_op(encrypt: bool) -> ChaChaOpFn {
+pub fn chacha20_poly1305_op(mode: Mode) -> ChaChaOpFn {
     let f = freebl();
-    if encrypt {
-        f.chacha_encrypt
-    } else {
-        f.chacha_decrypt
+    match mode {
+        Mode::Encrypt => f.chacha_encrypt,
+        Mode::Decrypt => f.chacha_decrypt,
     }
 }
 

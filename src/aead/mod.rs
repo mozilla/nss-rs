@@ -5,10 +5,13 @@
 // except according to those terms.
 
 #[cfg(not(feature = "disable-encryption"))]
-use std::os::raw::{c_char, c_uint};
+use std::os::raw::c_char;
 #[cfg(not(feature = "disable-encryption"))]
 use std::ptr::null;
-use std::{os::raw::c_int, ptr::null_mut};
+use std::{
+    os::raw::{c_int, c_uint},
+    ptr::null_mut,
+};
 
 #[cfg(feature = "disable-encryption")]
 pub use recprot::AEAD_NULL_TAG;
@@ -87,14 +90,7 @@ pub trait RecordProtectionOps {
 }
 
 #[cfg_attr(feature = "disable-encryption", path = "recprot_null.rs")]
-#[cfg_attr(
-    all(not(feature = "disable-encryption"), feature = "blapi"),
-    path = "recprot_blapi.rs"
-)]
-#[cfg_attr(
-    all(not(feature = "disable-encryption"), not(feature = "blapi")),
-    path = "recprot.rs"
-)]
+#[cfg_attr(feature = "blapi", path = "recprot_blapi.rs")]
 mod recprot;
 
 #[cfg(not(feature = "disable-encryption"))]
@@ -140,6 +136,20 @@ fn expand_hkdf_label(
         CK_MECHANISM_TYPE::from(CKM_HKDF_DATA),
         key_len,
     )
+}
+
+/// Derive a fixed-size raw key buffer using HKDF-Data.  The const generic `N`
+/// selects the output length, so callers get a `[u8; N]` directly with no
+/// further `try_into` boilerplate.
+#[cfg(not(feature = "disable-encryption"))]
+fn expand_label_buf<const N: usize>(
+    version: Version,
+    cipher: Cipher,
+    secret: &SymKey,
+    label: &str,
+) -> Res<[u8; N]> {
+    let k = expand_hkdf_label(version, cipher, secret, label, c_uint::try_from(N)?)?;
+    k.key_data()?.try_into().map_err(|_| Error::Internal)
 }
 
 /// All the nonces are the same length.  Exploit that.
@@ -213,7 +223,7 @@ pub enum AeadAlgorithms {
 
 impl AeadAlgorithms {
     #[must_use]
-    pub const fn key_len(self) -> usize {
+    pub const fn key_len(self) -> c_uint {
         match self {
             Self::Aes128Gcm => 16,
             Self::Aes256Gcm | Self::ChaCha20Poly1305 => 32,

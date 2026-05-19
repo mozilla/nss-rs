@@ -135,7 +135,7 @@ jobs:
           TEST_FIXTURE_DB: ${{ github.workspace }}/test-fixture/db-fips
         run: |
           # shellcheck disable=SC2086
-          cargo test $BUILD_TYPE --locked --features blapi
+          cargo test $BUILD_TYPE --locked --features blapi --test aead --test aead_fips
 
       - name: CodeCov Windows workaround
         if: ${{ startsWith(matrix.os, 'windows') && matrix.type == 'debug' && matrix.rust-toolchain == 'stable' }}

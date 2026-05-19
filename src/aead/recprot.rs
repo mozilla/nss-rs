@@ -11,7 +11,7 @@ use std::{
 
 use super::{
     AeadAlgorithms, COUNTER_LEN, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, c_int_len,
-    expand_hkdf_label, expand_label, split_tag, xor_nonce,
+    expand_label, expand_label_buf, split_tag, xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SECItemBorrowed, SymKey, Version,
@@ -24,7 +24,7 @@ use crate::{
 
 fn cipher_mech_and_key_len(cipher: Cipher) -> Res<(CK_MECHANISM_TYPE, c_uint)> {
     let spec = AeadAlgorithms::try_from(cipher)?;
-    Ok((spec.p11_mech(), c_uint::try_from(spec.key_len())?))
+    Ok((spec.p11_mech(), spec.key_len()))
 }
 
 fn make_ctx(
@@ -117,14 +117,8 @@ impl RecordProtection {
             mech,
             key_len,
         )?;
-        let iv = expand_hkdf_label(
-            version,
-            cipher,
-            secret,
-            &format!("{prefix}iv"),
-            c_uint::try_from(NONCE_LEN)?,
-        )?;
-        let nonce_base: [u8; NONCE_LEN] = iv.key_data()?.try_into().map_err(|_| Error::Internal)?;
+        let nonce_base: [u8; NONCE_LEN] =
+            expand_label_buf(version, cipher, secret, &format!("{prefix}iv"))?;
         let ctx = make_ctx(mech, mode.p11mode(), &key, &nonce_base)?;
         Ok(Self { ctx, nonce_base })
     }

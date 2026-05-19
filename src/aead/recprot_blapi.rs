@@ -17,8 +17,8 @@ use std::{
 };
 
 use super::{
-    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_hkdf_label, split_tag,
-    xor_nonce,
+    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_hkdf_label,
+    expand_label_buf, split_tag, xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SymKey, Version,
@@ -158,17 +158,10 @@ impl RecordProtection {
         mode: Mode,
     ) -> Res<Self> {
         let spec = AeadAlgorithms::try_from(cipher)?;
-        let key_len = c_uint::try_from(spec.key_len())?;
-        let derive = |suffix, len| {
-            expand_hkdf_label(version, cipher, secret, &format!("{prefix}{suffix}"), len)
-        };
-
-        let nonce_base: [u8; NONCE_LEN] = derive("iv", NONCE_LEN_C)?
-            .key_data()?
-            .try_into()
-            .map_err(|_| Error::Internal)?;
-
-        let key_sym = derive("key", key_len)?;
+        let key_len = spec.key_len();
+        let nonce_base: [u8; NONCE_LEN] =
+            expand_label_buf(version, cipher, secret, &format!("{prefix}iv"))?;
+        let key_sym = expand_hkdf_label(version, cipher, secret, &format!("{prefix}key"), key_len)?;
         let key_bytes = key_sym.key_data()?;
 
         let record_cipher = match spec {
@@ -176,7 +169,7 @@ impl RecordProtection {
                 let ctx = ChaCha20Ctx::from_ptr(unsafe {
                     freebl::ChaCha20Poly1305_CreateContext(key_bytes.as_ptr(), key_len, TAG_LEN_C)
                 })?;
-                let f = freebl::chacha20_poly1305_op(mode == Mode::Encrypt);
+                let f = freebl::chacha20_poly1305_op(mode);
                 RecordCipher::ChaCha(ctx, f)
             }
             AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => {
