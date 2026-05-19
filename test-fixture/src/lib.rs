@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nss_rs::{init_db, p11::PK11_IsFIPS, AntiReplay, TEST_FIXTURE_DB, TEST_FIXTURE_DB_FIPS};
+use nss_rs::{AntiReplay, TEST_FIXTURE_DB, TEST_FIXTURE_DB_FIPS, init_db, p11::PK11_IsFIPS};
 
 /// Returns the path to the NSS test fixture database.
 ///
@@ -42,7 +42,6 @@ static FIXTURE_INIT: Once = Once::new();
 /// # Panics
 ///
 /// When the NSS initialization fails.
-#[allow(dead_code)]
 pub fn fixture_init() {
     FIXTURE_INIT.call_once(|| {
         init_db(db_path()).unwrap();
@@ -54,12 +53,11 @@ pub fn fixture_init() {
 /// Returns `true` if NSS was successfully initialized in FIPS mode, or `false`
 /// if FIPS mode is not supported on this platform (e.g. a non-certified NSS
 /// build).  The caller should skip the test when this returns `false`.
-#[allow(dead_code)]
 pub fn fixture_init_fips() -> bool {
     FIXTURE_INIT.call_once(|| {
         // Ignore errors — non-certified NSS builds (e.g. macOS Homebrew) fail
         // the FIPS HMAC check and cannot initialize with a FIPS database.
-        let _ = init_db(TEST_FIXTURE_DB_FIPS);
+        _ = init_db(TEST_FIXTURE_DB_FIPS);
     });
     // SAFETY: NSS must be initialized before calling PK11_IsFIPS.
     unsafe { PK11_IsFIPS() != 0 }
@@ -68,10 +66,14 @@ pub fn fixture_init_fips() -> bool {
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
 // But make it a second, so that tests with reasonable RTTs don't fail.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(1);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Test fixture is the time source for tests."
+)]
 fn earlier() -> Instant {
     // Note: It is only OK to have a different base time for each thread because our tests are
     // single-threaded.
