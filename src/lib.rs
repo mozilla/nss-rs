@@ -193,6 +193,9 @@ pub fn init() -> Res<()> {
 /// The path to the default NSS database used for testing.
 pub const TEST_FIXTURE_DB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixture/db");
 
+/// The path to the FIPS-mode NSS database used for testing.
+pub const TEST_FIXTURE_DB_FIPS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixture/db-fips");
+
 /// Initialize with a database.
 ///
 /// # Errors

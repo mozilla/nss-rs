@@ -7,14 +7,15 @@
 #![cfg(not(feature = "disable-encryption"))]
 
 use nss_rs::{
-    Mode, RecordProtection, RecordProtectionOps as _,
+    Mode, RecordProtection, RecordProtectionOps as _, SymKey,
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
         TLS_VERSION_1_3,
     },
-    hkdf,
 };
 use test_fixture::fixture_init;
+
+mod common;
 
 const AAD: &[u8] = &[
     0xc1, 0xff, 0x00, 0x00, 0x12, 0x05, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x00, 0x40,
@@ -30,30 +31,22 @@ const PLAINTEXT: &[u8] = &[
     0x03, 0x04,
 ];
 
-fn make_secret() -> nss_rs::SymKey {
+fn make_secret() -> SymKey {
     fixture_init();
-    hkdf::import_key(
-        TLS_VERSION_1_3,
-        &[
-            0x47, 0xb2, 0xea, 0xea, 0x6c, 0x26, 0x6e, 0x32, 0xc0, 0x69, 0x7a, 0x9e, 0x2a, 0x89,
-            0x8b, 0xdf, 0x5c, 0x4f, 0xb3, 0xe5, 0xac, 0x34, 0xf0, 0xe5, 0x49, 0xbf, 0x2c, 0x58,
-            0x58, 0x1a, 0x38, 0x11,
-        ],
-    )
-    .expect("make a secret")
+    common::import_secret()
 }
 
-fn make_aead(cipher: Cipher, mode: Mode) -> RecordProtection {
-    let secret = make_secret();
-    RecordProtection::new(TLS_VERSION_1_3, cipher, &secret, "quic ", mode) // QUICv1 label prefix; note the trailing space here.
+fn make_aead(secret: &SymKey, cipher: Cipher, mode: Mode) -> RecordProtection {
+    RecordProtection::new(TLS_VERSION_1_3, cipher, secret, "quic ", mode) // QUICv1 label prefix; note the trailing space here.
         .expect("can make an AEAD")
 }
 
 #[test]
 fn aead_encrypt_decrypt() {
     const TOGGLE: u8 = 77;
-    let enc = make_aead(TLS_AES_128_GCM_SHA256, Mode::Encrypt);
-    let dec = make_aead(TLS_AES_128_GCM_SHA256, Mode::Decrypt);
+    let secret = make_secret();
+    let enc = make_aead(&secret, TLS_AES_128_GCM_SHA256, Mode::Encrypt);
+    let dec = make_aead(&secret, TLS_AES_128_GCM_SHA256, Mode::Decrypt);
     let ciphertext_buf = &mut [0; 1024]; // Can't use PLAINTEXT.len() here.
     let ciphertext = enc
         .encrypt(1, AAD, PLAINTEXT, ciphertext_buf)
@@ -125,7 +118,7 @@ fn aead_encrypt_decrypt() {
 
 #[test]
 fn aead_encrypt_in_place_too_small_buffer() {
-    let aead = make_aead(TLS_AES_128_GCM_SHA256, Mode::Encrypt);
+    let aead = make_aead(&make_secret(), TLS_AES_128_GCM_SHA256, Mode::Encrypt);
 
     // Create a buffer that's smaller than the expansion size
     let mut small_buffer = vec![0u8; aead.expansion() - 1];
@@ -136,35 +129,15 @@ fn aead_encrypt_in_place_too_small_buffer() {
 
 #[test]
 fn roundtrip_aes128() {
-    roundtrip(TLS_AES_128_GCM_SHA256);
-}
-
-fn roundtrip(cipher: Cipher) {
-    let enc = make_aead(cipher, Mode::Encrypt);
-    let dec = make_aead(cipher, Mode::Decrypt);
-
-    let ct_buf = &mut [0u8; 1024][..];
-    let ct = enc.encrypt(7, AAD, PLAINTEXT, ct_buf).expect("encrypt");
-    let pt_buf = &mut [0u8; 1024][..];
-    let pt = dec.decrypt(7, AAD, ct, pt_buf).expect("decrypt");
-    assert_eq!(pt, PLAINTEXT);
-
-    let mut ip = Vec::from(PLAINTEXT);
-    ip.resize(PLAINTEXT.len() + enc.expansion(), 0);
-    enc.encrypt_in_place(8, AAD, &mut ip)
-        .expect("encrypt_in_place");
-    let dec_len = dec
-        .decrypt_in_place(8, AAD, &mut ip)
-        .expect("decrypt_in_place");
-    assert_eq!(&ip[..dec_len], PLAINTEXT);
+    common::roundtrip(&make_secret(), TLS_AES_128_GCM_SHA256);
 }
 
 #[test]
 fn roundtrip_aes256() {
-    roundtrip(TLS_AES_256_GCM_SHA384);
+    common::roundtrip(&make_secret(), TLS_AES_256_GCM_SHA384);
 }
 
 #[test]
 fn roundtrip_chacha20() {
-    roundtrip(TLS_CHACHA20_POLY1305_SHA256);
+    common::roundtrip(&make_secret(), TLS_CHACHA20_POLY1305_SHA256);
 }

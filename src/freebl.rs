@@ -150,7 +150,15 @@ unsafe extern "C" {
 fn freebl() -> &'static FreeblFns {
     static FREEBL: OnceLock<FreeblFns> = OnceLock::new();
     FREEBL.get_or_init(|| {
-        let v = unsafe { &*FREEBL_GetVector() };
+        let ptr = unsafe { FREEBL_GetVector() };
+        assert!(!ptr.is_null(), "FREEBL_GetVector() returned null");
+        let v = unsafe { &*ptr };
+        assert!(
+            usize::from(v.length) >= size_of::<FREEBLVectorPartial>(),
+            "freebl vector too short (length {}, need {})",
+            v.length,
+            size_of::<FREEBLVectorPartial>(),
+        );
         FreeblFns {
             aes_create: v.p_AES_CreateContext.expect("freebl: AES_CreateContext"),
             aes_destroy: v.p_AES_DestroyContext.expect("freebl: AES_DestroyContext"),

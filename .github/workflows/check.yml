@@ -129,6 +129,14 @@ jobs:
           # shellcheck disable=SC2086
           cargo hack test $BUILD_TYPE --locked --feature-powerset --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
+      - name: Test blapi in FIPS mode
+        if: runner.os == 'Linux'
+        env:
+          TEST_FIXTURE_DB: ${{ github.workspace }}/test-fixture/db-fips
+        run: |
+          # shellcheck disable=SC2086
+          cargo test $BUILD_TYPE --locked --features blapi
+
       - name: CodeCov Windows workaround
         if: ${{ startsWith(matrix.os, 'windows') && matrix.type == 'debug' && matrix.rust-toolchain == 'stable' }}
         run: |
@@ -201,8 +209,7 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: Re-enable openbsd once OpenBSD > 7.8 ships; nss-3.101 (the version in 7.8) is too old.
-        # TODO: Re-enable NetBSD once NetBSD > 10.1 ships with NSS >= 3.121.
-        os: [freebsd] # NSS package on 'solaris' is too old.
+        os: [freebsd, netbsd] # NSS package on 'solaris' is too old.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
