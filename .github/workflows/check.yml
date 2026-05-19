@@ -99,7 +99,9 @@ jobs:
       - name: Check feature powerset
         run: |
           # shellcheck disable=SC2086
-          cargo hack check $BUILD_TYPE --locked --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
+          # --locked is omitted: --no-dev-deps modifies the manifest, which can
+          # require lockfile re-resolution in a workspace.
+          cargo hack check $BUILD_TYPE --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
       - name: Run tests and determine coverage
         env:
