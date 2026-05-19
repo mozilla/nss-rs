@@ -9,7 +9,7 @@
 use std::{
     cell::OnceCell,
     path::PathBuf,
-    sync::Once,
+    sync::{Once, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -54,13 +54,16 @@ pub fn fixture_init() {
 /// if FIPS mode is not supported on this platform (e.g. a non-certified NSS
 /// build).  The caller should skip the test when this returns `false`.
 pub fn fixture_init_fips() -> bool {
-    FIXTURE_INIT.call_once(|| {
-        // Ignore errors — non-certified NSS builds (e.g. macOS Homebrew) fail
-        // the FIPS HMAC check and cannot initialize with a FIPS database.
-        _ = init_db(TEST_FIXTURE_DB_FIPS);
-    });
-    // SAFETY: NSS must be initialized before calling PK11_IsFIPS.
-    unsafe { PK11_IsFIPS() != 0 }
+    static FIPS: OnceLock<bool> = OnceLock::new();
+    *FIPS.get_or_init(|| {
+        FIXTURE_INIT.call_once(|| {
+            // Ignore errors — non-certified NSS builds (e.g. macOS Homebrew) fail
+            // the FIPS HMAC check and cannot initialize with a FIPS database.
+            _ = init_db(TEST_FIXTURE_DB_FIPS);
+        });
+        // SAFETY: NSS must be initialized before calling PK11_IsFIPS.
+        unsafe { PK11_IsFIPS() != 0 }
+    })
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
