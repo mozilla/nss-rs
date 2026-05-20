@@ -229,6 +229,10 @@ fn dynamic_link() {
     for lib in dynamic_libs {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
+    maybe_link_freebl3();
+}
+
+fn maybe_link_freebl3() {
     if env::var("CARGO_FEATURE_BLAPI").is_ok() {
         println!("cargo:rustc-link-lib=dylib=freebl3");
     }
@@ -445,8 +449,8 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
             "blapi feature requires {freebl_lib} in the pkg-config \
              library paths. Set NSS_DIR to a standalone NSS source build."
         );
-        println!("cargo:rustc-link-lib=dylib=freebl3");
     }
+    maybe_link_freebl3();
 
     Ok(flags)
 }
@@ -510,11 +514,20 @@ fn setup_for_gecko() -> Vec<String> {
         println!("cargo:rustc-link-lib=dylib={}", lib);
     }
 
+    maybe_link_freebl3();
+
     if fold_libs {
         println!(
             "cargo:rustc-link-search=native={}",
             TOPOBJDIR.join("security").to_str().unwrap()
         );
+        if env::var("CARGO_FEATURE_BLAPI").is_ok() {
+            // freebl3 is not folded into nss3; it lives in dist/bin.
+            println!(
+                "cargo:rustc-link-search=native={}",
+                TOPOBJDIR.join("dist").join("bin").to_str().unwrap()
+            );
+        }
     } else {
         println!(
             "cargo:rustc-link-search=native={}",
