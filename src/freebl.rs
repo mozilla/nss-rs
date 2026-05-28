@@ -22,9 +22,10 @@ use std::{
     sync::OnceLock,
 };
 
-use crate::aead::Mode;
+use crate::{aead::Mode, err::Res};
 
-// NSS_AES_GCM = 4, AES_BLOCK_SIZE = 16 (from blapit.h)
+// NSS_AES = 0 (ECB), NSS_AES_GCM = 4, AES_BLOCK_SIZE = 16 (from blapit.h)
+pub const NSS_AES: c_int = 0;
 pub const NSS_AES_GCM: c_int = 4;
 pub const AES_BLOCK_SIZE: c_uint = 16;
 
@@ -91,6 +92,14 @@ type AesCreateFn = unsafe extern "C" fn(
     c_uint,
 ) -> *mut AESContext;
 type AesDestroyFn = unsafe extern "C" fn(*mut AESContext, c_int);
+type AesEncryptFn = unsafe extern "C" fn(
+    *mut AESContext,
+    *mut c_uchar,
+    *mut c_uint,
+    c_uint,
+    *const c_uchar,
+    c_uint,
+) -> c_int;
 type AesAeadFn = unsafe extern "C" fn(
     *mut AESContext,
     *mut c_uchar,
@@ -106,12 +115,22 @@ type AesAeadFn = unsafe extern "C" fn(
 type ChaChaCreateFn =
     unsafe extern "C" fn(*const c_uchar, c_uint, c_uint) -> *mut ChaCha20Poly1305Context;
 type ChaChaDestroyFn = unsafe extern "C" fn(*mut ChaCha20Poly1305Context, c_int);
+type ChaCha20XorFn = unsafe extern "C" fn(
+    *mut c_uchar,
+    *const c_uchar,
+    c_uint,
+    *const c_uchar,
+    *const c_uchar,
+    u32,
+) -> c_int;
 
 // Partial FREEBLVectorStr layout (lib/freebl/loader.h, NSS 3.x).
-// Only the fields needed for AEAD operations are named; the rest are
+// Only the fields needed for AEAD and HP operations are named; the rest are
 // opaque padding. Field positions (1-indexed from function pointers):
 //   30: p_AES_CreateContext        31: p_AES_DestroyContext
+//   32: p_AES_Encrypt              33: (p_AES_Decrypt, skipped)
 //  211: p_ChaCha20Poly1305_Create 212: p_ChaCha20Poly1305_Destroy
+//  228: p_ChaCha20_Xor
 //  235: p_ChaCha20Poly1305_Encrypt 236: p_ChaCha20Poly1305_Decrypt
 //  237: p_AES_AEAD
 #[repr(C)]
@@ -122,27 +141,33 @@ type ChaChaDestroyFn = unsafe extern "C" fn(*mut ChaCha20Poly1305Context, c_int)
 struct FREEBLVectorPartial {
     length: u16,
     version: u16,
-    _pre_aes: [*const c_void; 29], // 1–29
-    p_AES_CreateContext: Option<AesCreateFn>,
-    p_AES_DestroyContext: Option<AesDestroyFn>,
-    _between1: [*const c_void; 179], // 32–210
-    p_ChaCha20Poly1305_CreateContext: Option<ChaChaCreateFn>,
-    p_ChaCha20Poly1305_DestroyContext: Option<ChaChaDestroyFn>,
-    _between2: [*const c_void; 22], // 213–234
-    p_ChaCha20Poly1305_Encrypt: Option<ChaChaOpFn>,
-    p_ChaCha20Poly1305_Decrypt: Option<ChaChaOpFn>,
-    p_AES_AEAD: Option<AesAeadFn>,
+    _pre_aes: [*const c_void; 29],                              // 1–29
+    p_AES_CreateContext: Option<AesCreateFn>,                   // 30
+    p_AES_DestroyContext: Option<AesDestroyFn>,                 // 31
+    p_AES_Encrypt: Option<AesEncryptFn>,                        // 32
+    _skip_33: *const c_void,                                    // 33 (p_AES_Decrypt, unused)
+    _between1: [*const c_void; 177],                            // 34–210
+    p_ChaCha20Poly1305_CreateContext: Option<ChaChaCreateFn>,   // 211
+    p_ChaCha20Poly1305_DestroyContext: Option<ChaChaDestroyFn>, // 212
+    _between2: [*const c_void; 15],                             // 213–227
+    p_ChaCha20_Xor: Option<ChaCha20XorFn>,                      // 228
+    _between2b: [*const c_void; 6],                             // 229–234
+    p_ChaCha20Poly1305_Encrypt: Option<ChaChaOpFn>,             // 235
+    p_ChaCha20Poly1305_Decrypt: Option<ChaChaOpFn>,             // 236
+    p_AES_AEAD: Option<AesAeadFn>,                              // 237
 }
 
 // Extracted, non-nullable function pointers with idiomatic Rust names.
 struct FreeblFns {
     aes_create: AesCreateFn,
     aes_destroy: AesDestroyFn,
+    aes_encrypt: AesEncryptFn,
     aes_aead: AesAeadFn,
     chacha_create: ChaChaCreateFn,
     chacha_destroy: ChaChaDestroyFn,
     chacha_encrypt: ChaChaOpFn,
     chacha_decrypt: ChaChaOpFn,
+    chacha_xor: ChaCha20XorFn,
 }
 
 unsafe extern "C" {
@@ -164,6 +189,7 @@ fn freebl() -> &'static FreeblFns {
         FreeblFns {
             aes_create: v.p_AES_CreateContext.expect("freebl: AES_CreateContext"),
             aes_destroy: v.p_AES_DestroyContext.expect("freebl: AES_DestroyContext"),
+            aes_encrypt: v.p_AES_Encrypt.expect("freebl: AES_Encrypt"),
             aes_aead: v.p_AES_AEAD.expect("freebl: AES_AEAD"),
             chacha_create: v
                 .p_ChaCha20Poly1305_CreateContext
@@ -177,12 +203,13 @@ fn freebl() -> &'static FreeblFns {
             chacha_decrypt: v
                 .p_ChaCha20Poly1305_Decrypt
                 .expect("freebl: ChaCha20Poly1305_Decrypt"),
+            chacha_xor: v.p_ChaCha20_Xor.expect("freebl: ChaCha20_Xor"),
         }
     })
 }
 
 #[expect(non_snake_case, reason = "Matches the freebl C API.")]
-pub unsafe fn AES_CreateContext(
+unsafe fn AES_CreateContext(
     key: *const c_uchar,
     iv: *const c_uchar,
     mode: c_int,
@@ -191,6 +218,41 @@ pub unsafe fn AES_CreateContext(
     blocklen: c_uint,
 ) -> *mut AESContext {
     unsafe { (freebl().aes_create)(key, iv, mode, encrypt, keylen, blocklen) }
+}
+
+/// Create an `AesCtx` for the given AES `mode` and `encrypt` direction.
+///
+/// `key` supplies both the key bytes and the key length via its slice length.
+/// The IV is always `null` — ECB needs none, and GCM supplies the IV
+/// per-operation via the params struct passed to `AES_AEAD`.
+pub fn aes_context(key: &[u8], mode: c_int, encrypt: bool) -> Res<AesCtx> {
+    debug_assert!(
+        key.len() == 16 || key.len() == 32,
+        "AES key must be 16 or 32 bytes, got {}",
+        key.len()
+    );
+    AesCtx::from_ptr(unsafe {
+        AES_CreateContext(
+            key.as_ptr(),
+            std::ptr::null(),
+            mode,
+            c_int::from(encrypt),
+            c_uint::try_from(key.len())?,
+            AES_BLOCK_SIZE,
+        )
+    })
+}
+
+#[expect(non_snake_case, reason = "Matches the freebl C API.")]
+pub unsafe fn AES_Encrypt(
+    cx: *mut AESContext,
+    output: *mut c_uchar,
+    output_len: *mut c_uint,
+    max_output_len: c_uint,
+    input: *const c_uchar,
+    input_len: c_uint,
+) -> c_int {
+    unsafe { (freebl().aes_encrypt)(cx, output, output_len, max_output_len, input, input_len) }
 }
 
 #[expect(
@@ -233,6 +295,18 @@ pub unsafe fn ChaCha20Poly1305_CreateContext(
     tagLen: c_uint,
 ) -> *mut ChaCha20Poly1305Context {
     unsafe { (freebl().chacha_create)(key, keyLen, tagLen) }
+}
+
+#[expect(non_snake_case, reason = "Matches the freebl C API.")]
+pub unsafe fn ChaCha20_Xor(
+    output: *mut c_uchar,
+    block: *const c_uchar,
+    len: c_uint,
+    k: *const c_uchar,
+    nonce: *const c_uchar,
+    ctr: u32,
+) -> c_int {
+    unsafe { (freebl().chacha_xor)(output, block, len, k, nonce, ctr) }
 }
 
 /// Returns the encrypt or decrypt function pointer for ChaCha20-Poly1305.

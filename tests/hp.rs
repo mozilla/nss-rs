@@ -20,6 +20,9 @@ fn make_hp(cipher: Cipher) -> hp::Key {
     hp::Key::extract(TLS_VERSION_1_3, cipher, &prk, "hp").expect("extract label works")
 }
 
+// Each test asserts the same expected bytes regardless of the active backend.
+// Running the suite under both `--features blapi` and `--no-default-features`
+// therefore verifies that the freebl and PKCS#11 paths produce identical output.
 fn hp_test(cipher: Cipher, expected: &[u8]) {
     let hp = make_hp(cipher);
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");

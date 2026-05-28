@@ -12,13 +12,12 @@
 
 use std::{
     fmt,
-    os::raw::{c_int, c_uint, c_ulong},
-    ptr::null,
+    os::raw::{c_uint, c_ulong},
 };
 
 use super::{
-    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_hkdf_label,
-    expand_label_buf, split_tag, xor_nonce,
+    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, split_tag,
+    xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SymKey, Version,
@@ -157,33 +156,33 @@ impl RecordProtection {
         prefix: &str,
         mode: Mode,
     ) -> Res<Self> {
-        let spec = AeadAlgorithms::try_from(cipher)?;
-        let key_len = spec.key_len();
         let nonce_base: [u8; NONCE_LEN] =
             expand_label_buf(version, cipher, secret, &format!("{prefix}iv"))?;
-        let key_sym = expand_hkdf_label(version, cipher, secret, &format!("{prefix}key"), key_len)?;
-        let key_bytes = key_sym.key_data()?;
+        let key_label = format!("{prefix}key");
 
-        let record_cipher = match spec {
-            AeadAlgorithms::ChaCha20Poly1305 => {
-                let ctx = ChaCha20Ctx::from_ptr(unsafe {
-                    freebl::ChaCha20Poly1305_CreateContext(key_bytes.as_ptr(), key_len, TAG_LEN_C)
-                })?;
-                let f = freebl::chacha20_poly1305_op(mode);
-                RecordCipher::ChaCha(ctx, f)
+        let record_cipher = match AeadAlgorithms::try_from(cipher)? {
+            AeadAlgorithms::Aes128Gcm => {
+                let key: [u8; 16] = expand_label_buf(version, cipher, secret, &key_label)?;
+                RecordCipher::Aes(freebl::aes_context(
+                    &key,
+                    freebl::NSS_AES_GCM,
+                    mode == Mode::Encrypt,
+                )?)
             }
-            AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => {
-                let ctx = AesCtx::from_ptr(unsafe {
-                    freebl::AES_CreateContext(
-                        key_bytes.as_ptr(),
-                        null(),
-                        freebl::NSS_AES_GCM,
-                        c_int::from(mode == Mode::Encrypt),
-                        key_len,
-                        freebl::AES_BLOCK_SIZE,
-                    )
+            AeadAlgorithms::Aes256Gcm => {
+                let key: [u8; 32] = expand_label_buf(version, cipher, secret, &key_label)?;
+                RecordCipher::Aes(freebl::aes_context(
+                    &key,
+                    freebl::NSS_AES_GCM,
+                    mode == Mode::Encrypt,
+                )?)
+            }
+            AeadAlgorithms::ChaCha20Poly1305 => {
+                let key: [u8; 32] = expand_label_buf(version, cipher, secret, &key_label)?;
+                let ctx = ChaCha20Ctx::from_ptr(unsafe {
+                    freebl::ChaCha20Poly1305_CreateContext(key.as_ptr(), 32, TAG_LEN_C)
                 })?;
-                RecordCipher::Aes(ctx)
+                RecordCipher::ChaCha(ctx, freebl::chacha20_poly1305_op(mode))
             }
         };
 

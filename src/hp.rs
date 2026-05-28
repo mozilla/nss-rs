@@ -4,26 +4,38 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(not(feature = "blapi"))]
+use std::os::raw::c_int;
+#[cfg(not(feature = "blapi"))]
+use std::ptr::{null, null_mut};
 use std::{
-    convert::TryFrom as _,
     fmt::{self, Debug},
-    os::raw::{c_char, c_int, c_uint},
-    ptr::{null, null_mut},
+    os::raw::{c_char, c_uint},
 };
 
+#[cfg(not(feature = "blapi"))]
 use pkcs11_bindings::{CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20};
 
+#[cfg(not(feature = "blapi"))]
 use crate::{
     SECItemBorrowed,
+    err::Error,
+    p11::{
+        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, Context, PK11_CipherOp, PK11_CreateContextBySymKey,
+        PK11_Encrypt, PK11_GetBlockSize,
+    },
+};
+#[cfg(feature = "blapi")]
+use crate::{aead::expand_label_buf, freebl};
+use crate::{
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
         Version,
     },
-    err::{Error, Res, secstatus_to_res},
-    p11::{
-        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, Context, PK11_CipherOp,
-        PK11_CreateContextBySymKey, PK11_Encrypt, PK11_GetBlockSize, PK11SymKey, SymKey,
-    },
+    // Error is only referenced in the non-blapi path; the experimental_api! macro
+    // uses $crate::err::Error via its full path.
+    err::{Res, secstatus_to_res},
+    p11::{CK_MECHANISM_TYPE, PK11SymKey, SymKey},
 };
 
 experimental_api!(SSL_HkdfExpandLabelWithMech(
@@ -40,6 +52,7 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
 ));
 
 /// Creates an AES-ECB `PK11Context` from a `SymKey`.
+#[cfg(not(feature = "blapi"))]
 fn make_aes_ctx(key: &SymKey) -> Res<Context> {
     Context::from_ptr(unsafe {
         PK11_CreateContextBySymKey(
@@ -53,13 +66,39 @@ fn make_aes_ctx(key: &SymKey) -> Res<Context> {
 }
 
 pub enum Key {
+    /// AES-128-ECB header-protection context (freebl). Key bytes stored for
+    /// `try_clone`; the array length encodes the key size.
+    #[cfg(feature = "blapi")]
+    #[non_exhaustive]
+    Aes128 {
+        ctx: freebl::AesCtx,
+        key_bytes: [u8; 16],
+    },
+
+    /// AES-256-ECB header-protection context (freebl). Key bytes stored for
+    /// `try_clone`; the array length encodes the key size.
+    #[cfg(feature = "blapi")]
+    #[non_exhaustive]
+    Aes256 {
+        ctx: freebl::AesCtx,
+        key_bytes: [u8; 32],
+    },
+
     /// AES-ECB header-protection context.  `PK11_CloneContext` is not supported for
     /// AES-ECB, so the `SymKey` is stored alongside `ctx` to enable duplication via
     /// `try_clone`.
+    #[cfg(not(feature = "blapi"))]
     #[non_exhaustive]
     Aes { ctx: Context, key: SymKey },
+
+    /// `ChaCha20` HP key stored as raw bytes for direct freebl calls.
+    #[cfg(feature = "blapi")]
+    #[non_exhaustive]
+    Chacha([u8; 32]),
+
     /// The `ChaCha20` mask invokes `PK11_Encrypt` on each call because the counter
     /// and nonce change per invocation.
+    #[cfg(not(feature = "blapi"))]
     #[non_exhaustive]
     Chacha(SymKey),
 }
@@ -73,7 +112,49 @@ impl Debug for Key {
 impl Key {
     pub const SAMPLE_SIZE: usize = 16;
 
-    /// QUIC-specific API for extracting a header-protection key.
+    // SAMPLE_SIZE as c_uint for freebl calls in the blapi mask.
+    #[cfg(feature = "blapi")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "SAMPLE_SIZE = 16 fits in c_uint"
+    )]
+    const SAMPLE_LEN_C: c_uint = Self::SAMPLE_SIZE as c_uint;
+
+    /// QUIC-specific API for extracting a header-protection key (freebl path).
+    ///
+    /// # Errors
+    ///
+    /// Errors if HKDF fails or if the AES context cannot be created.
+    ///
+    /// # Panics
+    ///
+    /// When `cipher` is not known to this code.
+    #[cfg(feature = "blapi")]
+    pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
+        match cipher {
+            TLS_AES_128_GCM_SHA256 => {
+                let key_bytes: [u8; 16] = expand_label_buf(version, cipher, prk, label)?;
+                Ok(Self::Aes128 {
+                    ctx: freebl::aes_context(&key_bytes, freebl::NSS_AES, true)?,
+                    key_bytes,
+                })
+            }
+            TLS_AES_256_GCM_SHA384 => {
+                let key_bytes: [u8; 32] = expand_label_buf(version, cipher, prk, label)?;
+                Ok(Self::Aes256 {
+                    ctx: freebl::aes_context(&key_bytes, freebl::NSS_AES, true)?,
+                    key_bytes,
+                })
+            }
+            TLS_CHACHA20_POLY1305_SHA256 => {
+                let key_bytes: [u8; 32] = expand_label_buf(version, cipher, prk, label)?;
+                Ok(Self::Chacha(key_bytes))
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// QUIC-specific API for extracting a header-protection key (PKCS#11 path).
     ///
     /// # Errors
     ///
@@ -82,6 +163,7 @@ impl Key {
     /// # Panics
     ///
     /// When `cipher` is not known to this code.
+    #[cfg(not(feature = "blapi"))]
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
         let l = label.as_bytes();
         let mut secret: *mut PK11SymKey = null_mut();
@@ -127,6 +209,7 @@ impl Key {
         Ok(res)
     }
 
+    #[cfg(not(feature = "blapi"))]
     const fn block_size(&self) -> usize {
         match self {
             Self::Aes { .. } => 16,
@@ -138,7 +221,28 @@ impl Key {
     ///
     /// # Errors
     ///
+    /// Errors if AES context creation fails.
+    #[cfg(feature = "blapi")]
+    pub fn try_clone(&self) -> Res<Self> {
+        match self {
+            Self::Aes128 { key_bytes, .. } => Ok(Self::Aes128 {
+                ctx: freebl::aes_context(key_bytes, freebl::NSS_AES, true)?,
+                key_bytes: *key_bytes,
+            }),
+            Self::Aes256 { key_bytes, .. } => Ok(Self::Aes256 {
+                ctx: freebl::aes_context(key_bytes, freebl::NSS_AES, true)?,
+                key_bytes: *key_bytes,
+            }),
+            Self::Chacha(key_bytes) => Ok(Self::Chacha(*key_bytes)),
+        }
+    }
+
+    /// Duplicate this key, creating a new independent instance.
+    ///
+    /// # Errors
+    ///
     /// Errors if NSS context creation fails for AES keys.
+    #[cfg(not(feature = "blapi"))]
     pub fn try_clone(&self) -> Res<Self> {
         match self {
             Self::Aes { key, .. } => {
@@ -154,11 +258,64 @@ impl Key {
     ///
     /// # Errors
     ///
+    /// An error is returned if the underlying cryptographic functions fail.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if the cryptographic function returns an unexpected output length.
+    #[cfg(feature = "blapi")]
+    pub fn mask(&self, sample: &[u8; Self::SAMPLE_SIZE]) -> Res<[u8; Self::SAMPLE_SIZE]> {
+        let mut output = [0u8; Self::SAMPLE_SIZE];
+        match self {
+            // Both AES key sizes use the same ECB block operation for HP.
+            // SAFETY: `Key` is `!Sync` so concurrent calls are impossible.
+            // AES-ECB is stateless per block; the context holds only key schedule.
+            Self::Aes128 { ctx, .. } | Self::Aes256 { ctx, .. } => {
+                let mut output_len: c_uint = 0;
+                secstatus_to_res(unsafe {
+                    freebl::AES_Encrypt(
+                        **ctx,
+                        output.as_mut_ptr(),
+                        &raw mut output_len,
+                        Self::SAMPLE_LEN_C,
+                        sample.as_ptr(),
+                        Self::SAMPLE_LEN_C,
+                    )
+                })?;
+                debug_assert_eq!(output_len as usize, output.len());
+                Ok(output)
+            }
+            Self::Chacha(key_bytes) => {
+                // RFC 9001 §5.4.4: counter = sample[0..4] as little-endian u32,
+                // nonce = sample[4..16].
+                let (ctr_bytes, nonce) = sample.split_first_chunk::<4>().expect("SAMPLE_SIZE >= 4");
+                let ctr = u32::from_le_bytes(*ctr_bytes);
+                let zeros = [0u8; Self::SAMPLE_SIZE];
+                secstatus_to_res(unsafe {
+                    freebl::ChaCha20_Xor(
+                        output.as_mut_ptr(),
+                        zeros.as_ptr(),
+                        Self::SAMPLE_LEN_C,
+                        key_bytes.as_ptr(),
+                        nonce.as_ptr(),
+                        ctr,
+                    )
+                })?;
+                Ok(output)
+            }
+        }
+    }
+
+    /// Generate a header protection mask for QUIC.
+    ///
+    /// # Errors
+    ///
     /// An error is returned if the NSS functions fail.
     ///
     /// # Panics
     ///
     /// In debug builds, if NSS returns an unexpected output length.
+    #[cfg(not(feature = "blapi"))]
     pub fn mask(&self, sample: &[u8; Self::SAMPLE_SIZE]) -> Res<[u8; Self::SAMPLE_SIZE]> {
         let mut output = [0; Self::SAMPLE_SIZE];
 

@@ -142,7 +142,7 @@ fn expand_hkdf_label(
 /// selects the output length, so callers get a `[u8; N]` directly with no
 /// further `try_into` boilerplate.
 #[cfg(not(feature = "disable-encryption"))]
-fn expand_label_buf<const N: usize>(
+pub(crate) fn expand_label_buf<const N: usize>(
     version: Version,
     cipher: Cipher,
     secret: &SymKey,
