@@ -37,7 +37,7 @@ mod imp;
 /// Construct with [`Key::extract`]; use with [`Key::mask`].
 pub struct Key(imp::Key);
 
-const SAMPLE_SIZE: usize = 16;
+pub const SAMPLE_SIZE: usize = 16;
 
 impl Key {
     /// QUIC-specific API for extracting a header-protection key.
