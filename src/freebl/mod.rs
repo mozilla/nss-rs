@@ -7,15 +7,9 @@
 // Bindings to NSS's freebl AEAD primitives, bypassing the PKCS#11 session
 // layer.
 //
-// NOTE: calling these functions directly bypasses softoken's FIPS power-on
-// self-test gate. This is intentional for neqo (non-FIPS) and saves ~7.6%
-// CPU on the PK11_AEADOp hot path (sftk_SessionFromHandle + mutex overhead).
-//
 // Functions are accessed through FREEBL_GetVector() rather than as direct
-// symbol references, because on some platforms (e.g. FreeBSD) the freebl
-// shared library only exports FREEBL_GetVector and does not export individual
-// function symbols. The partial FREEBLVectorStr layout was verified against
-// lib/freebl/loader.h in NSS 3.x.
+// symbol references, because on some platforms (e.g. FreeBSD) freebl only
+// exports FREEBL_GetVector.
 
 use std::{
     os::raw::{c_int, c_uchar, c_uint, c_ulong, c_void},
@@ -66,9 +60,8 @@ pub struct CK_GCM_MESSAGE_PARAMS {
 #[cfg(not(target_os = "windows"))]
 const _: () = assert!(size_of::<CK_GCM_MESSAGE_PARAMS>() == 6 * size_of::<c_ulong>());
 
-// Function pointer type for ChaCha20-Poly1305 encrypt/decrypt.
-// Both operations share an identical signature; direction is baked in at
-// construction time by storing either the encrypt or decrypt pointer.
+// Encrypt and decrypt share this signature; direction is baked in at
+// construction time by storing either pointer.
 pub type ChaChaOpFn = unsafe extern "C" fn(
     *const ChaCha20Poly1305Context,
     *mut c_uchar,
@@ -83,6 +76,32 @@ pub type ChaChaOpFn = unsafe extern "C" fn(
     *mut c_uchar,
 ) -> c_int;
 
+// Full FREEBLVectorStr layout generated from lib/freebl/loader.h.
+// AESContext and ChaCha20Poly1305Context are blocklisted so the definitions
+// above are used. See the regeneration instructions in vector.rs.
+#[expect(
+    clippy::type_complexity,
+    dead_code,
+    non_camel_case_types,
+    non_snake_case,
+    reason = "generated code in vector.rs"
+)]
+mod generated {
+    use super::{AESContext, ChaCha20Poly1305Context};
+    // PLArenaPool is NSPR-internal; only forward-declared in freebl headers.
+    // KyberParams is an enum defined in kyber.h; underlying type is c_uint.
+    // Both appear in FREEBLVectorStr fields we don't extract.
+    #[repr(C)]
+    pub struct PLArenaPool {
+        _unused: [u8; 0],
+    }
+    pub type KyberParams = ::core::ffi::c_uint;
+    include!("vector.rs");
+}
+use generated::FREEBLVectorStr;
+
+// Structurally identical to the anonymous types in FREEBLVectorStr
+// (SECStatus = c_int, PRBool = c_int, PRUint32 = c_uint = u32).
 type AesCreateFn = unsafe extern "C" fn(
     *const c_uchar,
     *const c_uchar,
@@ -124,39 +143,6 @@ type ChaCha20XorFn = unsafe extern "C" fn(
     u32,
 ) -> c_int;
 
-// Partial FREEBLVectorStr layout (lib/freebl/loader.h, NSS 3.x).
-// Only the fields needed for AEAD and HP operations are named; the rest are
-// opaque padding. Field positions (1-indexed from function pointers):
-//   30: p_AES_CreateContext        31: p_AES_DestroyContext
-//   32: p_AES_Encrypt              33: (p_AES_Decrypt, skipped)
-//  211: p_ChaCha20Poly1305_Create 212: p_ChaCha20Poly1305_Destroy
-//  228: p_ChaCha20_Xor
-//  235: p_ChaCha20Poly1305_Encrypt 236: p_ChaCha20Poly1305_Decrypt
-//  237: p_AES_AEAD
-#[repr(C)]
-#[expect(
-    non_snake_case,
-    reason = "Matches C field names from loader.h for cross-reference."
-)]
-struct FREEBLVectorPartial {
-    length: u16,
-    version: u16,
-    _pre_aes: [*const c_void; 29],                              // 1–29
-    p_AES_CreateContext: Option<AesCreateFn>,                   // 30
-    p_AES_DestroyContext: Option<AesDestroyFn>,                 // 31
-    p_AES_Encrypt: Option<AesEncryptFn>,                        // 32
-    _skip_33: *const c_void,                                    // 33 (p_AES_Decrypt, unused)
-    _between1: [*const c_void; 177],                            // 34–210
-    p_ChaCha20Poly1305_CreateContext: Option<ChaChaCreateFn>,   // 211
-    p_ChaCha20Poly1305_DestroyContext: Option<ChaChaDestroyFn>, // 212
-    _between2: [*const c_void; 15],                             // 213–227
-    p_ChaCha20_Xor: Option<ChaCha20XorFn>,                      // 228
-    _between2b: [*const c_void; 6],                             // 229–234
-    p_ChaCha20Poly1305_Encrypt: Option<ChaChaOpFn>,             // 235
-    p_ChaCha20Poly1305_Decrypt: Option<ChaChaOpFn>,             // 236
-    p_AES_AEAD: Option<AesAeadFn>,                              // 237
-}
-
 // Extracted, non-nullable function pointers with idiomatic Rust names.
 struct FreeblFns {
     aes_create: AesCreateFn,
@@ -171,7 +157,7 @@ struct FreeblFns {
 }
 
 unsafe extern "C" {
-    fn FREEBL_GetVector() -> *const FREEBLVectorPartial;
+    fn FREEBL_GetVector() -> *const FREEBLVectorStr;
 }
 
 fn freebl() -> &'static FreeblFns {
@@ -180,11 +166,14 @@ fn freebl() -> &'static FreeblFns {
         let ptr = unsafe { FREEBL_GetVector() };
         assert!(!ptr.is_null(), "FREEBL_GetVector() returned null");
         let v = unsafe { &*ptr };
+        // p_AES_AEAD (field 237) is the last slot we extract; check the vector
+        // is at least large enough to contain it.
+        let min =
+            core::mem::offset_of!(FREEBLVectorStr, p_AES_AEAD) + size_of::<Option<AesAeadFn>>();
         assert!(
-            usize::from(v.length) >= size_of::<FREEBLVectorPartial>(),
-            "freebl vector too short (length {}, need {})",
+            usize::from(v.length) >= min,
+            "freebl vector too short (length {}, need {min})",
             v.length,
-            size_of::<FREEBLVectorPartial>(),
         );
         FreeblFns {
             aes_create: v.p_AES_CreateContext.expect("freebl: AES_CreateContext"),
@@ -225,7 +214,11 @@ unsafe fn AES_CreateContext(
 /// `key` supplies both the key bytes and the key length via its slice length.
 /// The IV is always `null` — ECB needs none, and GCM supplies the IV
 /// per-operation via the params struct passed to `AES_AEAD`.
-pub fn aes_context(key: &[u8], mode: c_int, encrypt: bool) -> Res<AesCtx> {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) signals intent; the module is also pub(crate) which Clippy treats as equivalent"
+)]
+pub(crate) fn aes_context(key: &[u8], mode: c_int, encrypt: bool) -> Res<AesCtx> {
     debug_assert!(
         key.len() == 16 || key.len() == 32,
         "AES key must be 16 or 32 bytes, got {}",
@@ -243,8 +236,12 @@ pub fn aes_context(key: &[u8], mode: c_int, encrypt: bool) -> Res<AesCtx> {
     })
 }
 
-#[expect(non_snake_case, reason = "Matches the freebl C API.")]
-pub unsafe fn AES_Encrypt(
+#[expect(
+    clippy::redundant_pub_crate,
+    non_snake_case,
+    reason = "pub(crate) signals intent; the module is also pub(crate) which Clippy treats as equivalent"
+)]
+pub(crate) unsafe fn AES_Encrypt(
     cx: *mut AESContext,
     output: *mut c_uchar,
     output_len: *mut c_uint,
@@ -297,8 +294,12 @@ pub unsafe fn ChaCha20Poly1305_CreateContext(
     unsafe { (freebl().chacha_create)(key, keyLen, tagLen) }
 }
 
-#[expect(non_snake_case, reason = "Matches the freebl C API.")]
-pub unsafe fn ChaCha20_Xor(
+#[expect(
+    clippy::redundant_pub_crate,
+    non_snake_case,
+    reason = "pub(crate) signals intent; the module is also pub(crate) which Clippy treats as equivalent"
+)]
+pub(crate) unsafe fn ChaCha20_Xor(
     output: *mut c_uchar,
     block: *const c_uchar,
     len: c_uint,
