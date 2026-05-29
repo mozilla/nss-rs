@@ -37,7 +37,7 @@ mod imp;
 /// Construct with [`Key::extract`]; use with [`Key::mask`].
 pub struct Key(imp::Key);
 
-pub const SAMPLE_SIZE: usize = 16;
+const SAMPLE_SIZE: usize = 16;
 
 impl Key {
     pub const SAMPLE_SIZE: usize = SAMPLE_SIZE;
