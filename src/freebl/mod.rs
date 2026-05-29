@@ -140,7 +140,7 @@ type ChaCha20XorFn = unsafe extern "C" fn(
     c_uint,
     *const c_uchar,
     *const c_uchar,
-    u32,
+    c_uint,
 ) -> c_int;
 
 // Extracted, non-nullable function pointers with idiomatic Rust names.
