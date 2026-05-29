@@ -40,6 +40,8 @@ pub struct Key(imp::Key);
 pub const SAMPLE_SIZE: usize = 16;
 
 impl Key {
+    pub const SAMPLE_SIZE: usize = SAMPLE_SIZE;
+
     /// QUIC-specific API for extracting a header-protection key.
     ///
     /// # Errors
