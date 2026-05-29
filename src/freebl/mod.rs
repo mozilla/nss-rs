@@ -305,7 +305,7 @@ pub(crate) unsafe fn ChaCha20_Xor(
     len: c_uint,
     k: *const c_uchar,
     nonce: *const c_uchar,
-    ctr: u32,
+    ctr: c_uint,
 ) -> c_int {
     unsafe { (freebl().chacha_xor)(output, block, len, k, nonce, ctr) }
 }
