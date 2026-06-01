@@ -38,17 +38,14 @@ fn make_aes_ctx(key: &SymKey) -> Res<Context> {
     .map_err(|_| Error::CipherInit)
 }
 
-enum KeyKind {
-    // PK11_CloneContext is not supported for AES-ECB, so the SymKey is stored
-    // alongside ctx to enable duplication via try_clone.
+// PK11_CloneContext is not supported for AES-ECB, so the SymKey is stored
+// alongside ctx to enable duplication via try_clone.
+//
+// The ChaCha20 mask invokes PK11_Encrypt on each call because the counter
+// and nonce change per invocation.
+pub enum Key {
     Aes { ctx: Context, key: SymKey },
-    // The ChaCha20 mask invokes PK11_Encrypt on each call because the counter
-    // and nonce change per invocation.
     Chacha(SymKey),
-}
-
-pub struct Key {
-    kind: KeyKind,
 }
 
 impl Key {
@@ -59,18 +56,14 @@ impl Key {
 
         // Derive all spec-dependent values in one place so the AES-vs-ChaCha
         // decision is made exactly once.
-        let (mech, make_kind): (_, fn(SymKey) -> Res<KeyKind>) = match spec {
-            AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => {
-                (CK_MECHANISM_TYPE::from(CKM_AES_ECB), |key| {
-                    Ok(KeyKind::Aes {
-                        ctx: make_aes_ctx(&key)?,
-                        key,
-                    })
+        let (mech, make_kind): (_, fn(SymKey) -> Res<Self>) = match spec {
+            AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => (CKM_AES_ECB, |key| {
+                Ok(Self::Aes {
+                    ctx: make_aes_ctx(&key)?,
+                    key,
                 })
-            }
-            AeadAlgorithms::ChaCha20Poly1305 => (CK_MECHANISM_TYPE::from(CKM_CHACHA20), |key| {
-                Ok(KeyKind::Chacha(key))
             }),
+            AeadAlgorithms::ChaCha20Poly1305 => (CKM_CHACHA20, |key| Ok(Self::Chacha(key))),
         };
 
         // Note that this doesn't allow for passing null() for the handshake hash.
@@ -84,7 +77,7 @@ impl Key {
                 0,
                 l.as_ptr().cast(),
                 c_uint::try_from(l.len())?,
-                mech,
+                CK_MECHANISM_TYPE::from(mech),
                 spec.key_len(),
                 &raw mut secret,
             )
@@ -97,32 +90,34 @@ impl Key {
                 AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => 16,
                 AeadAlgorithms::ChaCha20Poly1305 => 64,
             },
-            usize::try_from(unsafe { PK11_GetBlockSize(mech, null_mut()) })?
+            usize::try_from(unsafe {
+                PK11_GetBlockSize(CK_MECHANISM_TYPE::from(mech), null_mut())
+            })?
         );
-        Ok(Self { kind })
+        Ok(kind)
     }
 
     pub fn try_clone(&self) -> Res<Self> {
-        let kind = match &self.kind {
-            KeyKind::Aes { key, .. } => {
+        Ok(match self {
+            Self::Aes { key, .. } => {
                 let key = key.clone();
-                let ctx = make_aes_ctx(&key)?;
-                KeyKind::Aes { ctx, key }
+                Self::Aes {
+                    ctx: make_aes_ctx(&key)?,
+                    key,
+                }
             }
-            KeyKind::Chacha(k) => KeyKind::Chacha(k.clone()),
-        };
-        Ok(Self { kind })
+            Self::Chacha(k) => Self::Chacha(k.clone()),
+        })
     }
 
     pub fn mask(&self, sample: &[u8; SAMPLE_SIZE]) -> Res<[u8; SAMPLE_SIZE]> {
         let mut output = [0u8; SAMPLE_SIZE];
-        match &self.kind {
-            KeyKind::Aes { ctx, .. } => {
+        match self {
+            Self::Aes { ctx, .. } => {
                 let mut output_len: c_int = 0;
-                // SAFETY: Deref on Context copies the raw *mut PK11Context pointer
-                // value; no Rust reference to the pointee is created.  Key is !Sync,
-                // so concurrent invocations are impossible, and AES-ECB full-block
-                // operations retain no inter-call state in the context.
+                // SAFETY: NSS guarantees that concurrent access to a context is safe.
+                // For this case in particular, AES-ECB does not mutate the context and
+                // no inter-call state is retained.
                 secstatus_to_res(unsafe {
                     PK11_CipherOp(
                         **ctx,
@@ -136,7 +131,7 @@ impl Key {
                 debug_assert_eq!(usize::try_from(output_len)?, output.len());
                 Ok(output)
             }
-            KeyKind::Chacha(key) => {
+            Self::Chacha(key) => {
                 let params = CK_CHACHA20_PARAMS {
                     pBlockCounter: sample.as_ptr().cast_mut(),
                     blockCounterBits: 32,

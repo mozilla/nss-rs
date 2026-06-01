@@ -22,7 +22,7 @@
 //     --opaque-type "PLArena.*"                    \
 //     --opaque-type "SECItem.*"                    \
 //     --opaque-type "SECHash.*"                    \
-//     --no-layout-tests --use-core                 \
+//     --no-layout-tests                            \
 //     -- -I $NSS/lib/freebl -I $NSS/lib/freebl/ecl \
 //        -I $NSS/lib/util   -I $NSS/lib/nss        \
 //        -I $NSPR/Release/dist/include/nspr        \

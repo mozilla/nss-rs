@@ -24,7 +24,7 @@ use crate::{
 )]
 const SAMPLE_LEN: c_uint = SAMPLE_SIZE as c_uint;
 
-enum KeyKind {
+pub enum Key {
     Aes128 {
         ctx: freebl::AesCtx,
         key_bytes: [u8; 16],
@@ -36,58 +36,53 @@ enum KeyKind {
     Chacha([u8; 32]),
 }
 
-pub struct Key {
-    kind: KeyKind,
-}
-
 impl Key {
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
-        let kind = match AeadAlgorithms::try_from(cipher)? {
+        Ok(match AeadAlgorithms::try_from(cipher)? {
             AeadAlgorithms::Aes128Gcm => {
                 let key_bytes: [u8; 16] = expand_label_buf(version, cipher, prk, label)?;
-                KeyKind::Aes128 {
+                Self::Aes128 {
                     ctx: freebl::aes_context(&key_bytes, freebl::NSS_AES, true)?,
                     key_bytes,
                 }
             }
             AeadAlgorithms::Aes256Gcm => {
                 let key_bytes: [u8; 32] = expand_label_buf(version, cipher, prk, label)?;
-                KeyKind::Aes256 {
+                Self::Aes256 {
                     ctx: freebl::aes_context(&key_bytes, freebl::NSS_AES, true)?,
                     key_bytes,
                 }
             }
             AeadAlgorithms::ChaCha20Poly1305 => {
                 let key_bytes: [u8; 32] = expand_label_buf(version, cipher, prk, label)?;
-                KeyKind::Chacha(key_bytes)
+                Self::Chacha(key_bytes)
             }
-        };
-        Ok(Self { kind })
+        })
     }
 
     pub fn try_clone(&self) -> Res<Self> {
-        let kind = match &self.kind {
-            KeyKind::Aes128 { key_bytes, .. } => KeyKind::Aes128 {
+        Ok(match self {
+            Self::Aes128 { key_bytes, .. } => Self::Aes128 {
                 ctx: freebl::aes_context(key_bytes, freebl::NSS_AES, true)?,
                 key_bytes: *key_bytes,
             },
-            KeyKind::Aes256 { key_bytes, .. } => KeyKind::Aes256 {
+            Self::Aes256 { key_bytes, .. } => Self::Aes256 {
                 ctx: freebl::aes_context(key_bytes, freebl::NSS_AES, true)?,
                 key_bytes: *key_bytes,
             },
-            KeyKind::Chacha(key_bytes) => KeyKind::Chacha(*key_bytes),
-        };
-        Ok(Self { kind })
+            Self::Chacha(key_bytes) => Self::Chacha(*key_bytes),
+        })
     }
 
     pub fn mask(&self, sample: &[u8; SAMPLE_SIZE]) -> Res<[u8; SAMPLE_SIZE]> {
         let mut output = [0u8; SAMPLE_SIZE];
-        match &self.kind {
+        match self {
             // Both AES key sizes use the same ECB block operation for HP.
-            KeyKind::Aes128 { ctx, .. } | KeyKind::Aes256 { ctx, .. } => {
+            Self::Aes128 { ctx, .. } | Self::Aes256 { ctx, .. } => {
                 let mut output_len: c_uint = 0;
-                // SAFETY: Key is !Sync so concurrent calls are impossible;
-                // AES-ECB is stateless per block so the context needs no lock.
+                // SAFETY: NSS guarantees that concurrent access to a context is safe.
+                // For this case in particular, AES-ECB does not mutate the context and
+                // no inter-call state is retained.
                 secstatus_to_res(unsafe {
                     freebl::AES_Encrypt(
                         **ctx,
@@ -101,7 +96,7 @@ impl Key {
                 debug_assert_eq!(output_len as usize, output.len());
                 Ok(output)
             }
-            KeyKind::Chacha(key_bytes) => {
+            Self::Chacha(key_bytes) => {
                 // RFC 9001 §5.4.4: counter = sample[0..4] as little-endian u32,
                 // nonce = sample[4..16].
                 // ChaCha20_Xor reads a 12-byte nonce implicitly; assert the coupling.

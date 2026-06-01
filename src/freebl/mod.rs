@@ -166,8 +166,8 @@ fn freebl() -> &'static FreeblFns {
         let ptr = unsafe { FREEBL_GetVector() };
         assert!(!ptr.is_null(), "FREEBL_GetVector() returned null");
         let v = unsafe { &*ptr };
-        // p_AES_AEAD (field 237) is the last slot we extract; check the vector
-        // is at least large enough to contain it.
+        // p_AES_AEAD is at the highest offset among the fields we extract;
+        // check the vector is at least large enough to contain it.
         let min =
             core::mem::offset_of!(FREEBLVectorStr, p_AES_AEAD) + size_of::<Option<AesAeadFn>>();
         assert!(

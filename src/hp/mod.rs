@@ -28,14 +28,13 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
     secret: *mut *mut PK11SymKey,
 ));
 
-#[cfg_attr(feature = "blapi", path = "hp_blapi.rs")]
-#[cfg_attr(not(feature = "blapi"), path = "hp.rs")]
-mod imp;
+#[cfg_attr(feature = "blapi", path = "header_protection_blapi.rs")]
+mod header_protection;
 
 /// A QUIC header-protection key.
 ///
 /// Construct with [`Key::extract`]; use with [`Key::mask`].
-pub struct Key(imp::Key);
+pub struct Key(header_protection::Key);
 
 const SAMPLE_SIZE: usize = 16;
 
@@ -52,7 +51,7 @@ impl Key {
     ///
     /// When `cipher` is not known to this code.
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
-        imp::Key::extract(version, cipher, prk, label).map(Self)
+        header_protection::Key::extract(version, cipher, prk, label).map(Self)
     }
 
     /// Duplicate this key, creating a new independent instance.
