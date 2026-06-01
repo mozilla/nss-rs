@@ -59,7 +59,7 @@ impl Key {
 
         // Derive all spec-dependent values in one place so the AES-vs-ChaCha
         // decision is made exactly once.
-        let (mech, make_kind): (CK_MECHANISM_TYPE, fn(SymKey) -> Res<KeyKind>) = match spec {
+        let (mech, make_kind): (_, fn(SymKey) -> Res<KeyKind>) = match spec {
             AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => {
                 (CK_MECHANISM_TYPE::from(CKM_AES_ECB), |key| {
                     Ok(KeyKind::Aes {
