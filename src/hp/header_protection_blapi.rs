@@ -9,6 +9,8 @@
 
 use std::os::raw::c_uint;
 
+use zeroize::ZeroizeOnDrop;
+
 use super::SAMPLE_SIZE;
 use crate::{
     aead::{AeadAlgorithms, expand_label_buf},
@@ -24,12 +26,17 @@ use crate::{
 )]
 const SAMPLE_LEN: c_uint = SAMPLE_SIZE as c_uint;
 
+// blapi holds raw key bytes outside NSS-managed memory, so zero them on drop;
+// the PKCS#11 backend relies on SymKey for this instead.
+#[derive(ZeroizeOnDrop)]
 pub enum Key {
     Aes128 {
+        #[zeroize(skip)]
         ctx: freebl::AesCtx,
         key_bytes: [u8; 16],
     },
     Aes256 {
+        #[zeroize(skip)]
         ctx: freebl::AesCtx,
         key_bytes: [u8; 32],
     },
