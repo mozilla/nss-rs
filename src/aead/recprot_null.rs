@@ -109,7 +109,7 @@ impl fmt::Debug for RecordProtection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{AEAD_NULL_TAG, RecordProtection, RecordProtectionOps};
+    use super::{AEAD_NULL_TAG, RecordProtection, RecordProtectionOps as _};
 
     fn aead() -> RecordProtection {
         RecordProtection {}
