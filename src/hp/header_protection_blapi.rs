@@ -104,7 +104,8 @@ impl Key {
                     SAMPLE_SIZE - 4 == 12,
                     "ChaCha20_Xor expects a 12-byte nonce"
                 );
-                let ctr = u32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]);
+                let (&ctr_bytes, nonce) = sample.split_first_chunk::<4>().unwrap();
+                let ctr = u32::from_le_bytes(ctr_bytes);
                 let nonce = &sample[4..];
                 let zeros = [0u8; SAMPLE_SIZE];
                 secstatus_to_res(unsafe {
