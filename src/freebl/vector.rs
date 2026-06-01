@@ -7,7 +7,7 @@
 // Bindings for FREEBLVectorStr from lib/freebl/loader.h.
 //
 // Regenerate with:
-//   NSS=<path to NSS sources> NSPR=<path to NSPR sources>
+//   NSS=<path to NSS sources> NSPR=<path to NSPR sources, with Release build>
 //   bindgen src/freebl/bindgen.h                   \
 //     --allowlist-type "FREEBLVectorStr"           \
 //     --blocklist-item "AESContext"                \
