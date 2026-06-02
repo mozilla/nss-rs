@@ -18,11 +18,10 @@ use std::{
 use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use super::{
-    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, split_tag,
-    xor_nonce,
+    Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, split_tag, xor_nonce,
 };
 use crate::{
-    Cipher, Error, Res, SymKey, Version,
+    Cipher, CipherSuite, Error, Res, SymKey, Version,
     err::{sec::SEC_ERROR_BAD_DATA, secstatus_to_res},
     freebl::{self, AesCtx, ChaCha20Ctx, ChaChaOpFn},
 };
@@ -167,8 +166,8 @@ impl RecordProtection {
             expand_label_buf(version, cipher, secret, &format!("{prefix}iv"))?;
         let key_label = format!("{prefix}key");
 
-        let record_cipher = match AeadAlgorithms::try_from(cipher)? {
-            AeadAlgorithms::Aes128Gcm => {
+        let record_cipher = match CipherSuite::try_from(cipher)? {
+            CipherSuite::Aes128Gcm => {
                 let key =
                     Zeroizing::new(expand_label_buf::<16>(version, cipher, secret, &key_label)?);
                 RecordCipher::Aes(freebl::aes_context(
@@ -177,7 +176,7 @@ impl RecordProtection {
                     mode == Mode::Encrypt,
                 )?)
             }
-            AeadAlgorithms::Aes256Gcm => {
+            CipherSuite::Aes256Gcm => {
                 let key =
                     Zeroizing::new(expand_label_buf::<32>(version, cipher, secret, &key_label)?);
                 RecordCipher::Aes(freebl::aes_context(
@@ -186,7 +185,7 @@ impl RecordProtection {
                     mode == Mode::Encrypt,
                 )?)
             }
-            AeadAlgorithms::ChaCha20Poly1305 => {
+            CipherSuite::ChaCha20Poly1305 => {
                 let key =
                     Zeroizing::new(expand_label_buf::<32>(version, cipher, secret, &key_label)?);
                 let ctx = ChaCha20Ctx::from_ptr(unsafe {

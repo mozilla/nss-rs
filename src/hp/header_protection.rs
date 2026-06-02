@@ -17,8 +17,7 @@ use pkcs11_bindings::{CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20};
 use super::{SAMPLE_SIZE, SSL_HkdfExpandLabelWithMech};
 use crate::{
     SECItemBorrowed,
-    aead::AeadAlgorithms,
-    constants::{Cipher, Version},
+    constants::{Cipher, CipherSuite, Version},
     err::{Error, Res, secstatus_to_res},
     p11::{
         CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, Context, PK11_CipherOp,
@@ -52,18 +51,18 @@ impl Key {
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
         let l = label.as_bytes();
         let mut secret: *mut PK11SymKey = null_mut();
-        let spec = AeadAlgorithms::try_from(cipher)?;
+        let spec = CipherSuite::try_from(cipher)?;
 
         // Derive all spec-dependent values in one place so the AES-vs-ChaCha
         // decision is made exactly once.
         let (mech, make_kind): (_, fn(SymKey) -> Res<Self>) = match spec {
-            AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => (CKM_AES_ECB, |key| {
+            CipherSuite::Aes128Gcm | CipherSuite::Aes256Gcm => (CKM_AES_ECB, |key| {
                 Ok(Self::Aes {
                     ctx: make_aes_ctx(&key)?,
                     key,
                 })
             }),
-            AeadAlgorithms::ChaCha20Poly1305 => (CKM_CHACHA20, |key| Ok(Self::Chacha(key))),
+            CipherSuite::ChaCha20Poly1305 => (CKM_CHACHA20, |key| Ok(Self::Chacha(key))),
         };
 
         // Note that this doesn't allow for passing null() for the handshake hash.
@@ -87,8 +86,8 @@ impl Key {
 
         debug_assert_eq!(
             match spec {
-                AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => 16,
-                AeadAlgorithms::ChaCha20Poly1305 => 64,
+                CipherSuite::Aes128Gcm | CipherSuite::Aes256Gcm => 16,
+                CipherSuite::ChaCha20Poly1305 => 64,
             },
             usize::try_from(unsafe {
                 PK11_GetBlockSize(CK_MECHANISM_TYPE::from(mech), null_mut())

@@ -7,7 +7,7 @@
 use enum_map::Enum;
 use strum::FromRepr;
 
-use crate::{Error, ssl};
+use crate::{Error, Res, ssl};
 
 // Ideally all of these would be enums, but size matters and we need to allow
 // for values outside of those that are defined here.
@@ -73,6 +73,26 @@ remap_enum! {
         TLS_AES_128_GCM_SHA256 = TLS_AES_128_GCM_SHA256,
         TLS_AES_256_GCM_SHA384 = TLS_AES_256_GCM_SHA384,
         TLS_CHACHA20_POLY1305_SHA256 = TLS_CHACHA20_POLY1305_SHA256,
+    }
+}
+
+/// A TLS 1.3 cipher suite, abstracting over the AEAD algorithm in use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CipherSuite {
+    Aes128Gcm,
+    Aes256Gcm,
+    ChaCha20Poly1305,
+}
+
+impl TryFrom<Cipher> for CipherSuite {
+    type Error = Error;
+    fn try_from(cipher: Cipher) -> Res<Self> {
+        match cipher {
+            TLS_AES_128_GCM_SHA256 => Ok(Self::Aes128Gcm),
+            TLS_AES_256_GCM_SHA384 => Ok(Self::Aes256Gcm),
+            TLS_CHACHA20_POLY1305_SHA256 => Ok(Self::ChaCha20Poly1305),
+            _ => Err(Error::UnsupportedCipher),
+        }
     }
 }
 

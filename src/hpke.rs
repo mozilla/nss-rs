@@ -16,7 +16,7 @@ use super::{
     p11::{PrivateKey, PublicKey, Slot},
 };
 use crate::{
-    PRBool, SECItem, aead::AeadAlgorithms, err::Res, hkdf::HkdfAlgorithm, p11, p11::SymKey,
+    CipherSuite, PRBool, SECItem, err::Res, hkdf::HkdfAlgorithm, p11, p11::SymKey,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,11 +29,11 @@ pub enum KemAlgorithm {
 pub struct Config {
     kem: KemAlgorithm,
     kdf: HkdfAlgorithm,
-    aead: AeadAlgorithms,
+    aead: CipherSuite,
 }
 
 impl Config {
-    pub fn new(kem: KemAlgorithm, kdf: HkdfAlgorithm, aead: AeadAlgorithms) -> Self {
+    pub fn new(kem: KemAlgorithm, kdf: HkdfAlgorithm, aead: CipherSuite) -> Self {
         Self { kem, kdf, aead }
     }
 
@@ -45,7 +45,7 @@ impl Config {
         self.kdf
     }
 
-    pub fn aead(self) -> AeadAlgorithms {
+    pub fn aead(self) -> CipherSuite {
         self.aead
     }
 
@@ -54,7 +54,7 @@ impl Config {
             p11::PK11_HPKE_ValidateParameters(
                 KemAlgorithm::Type::from(u16::from(self.kem)),
                 HkdfAlgorithm::Type::from(u16::from(self.kdf)),
-                AeadAlgorithms::Type::from(u16::from(self.aead)),
+                CipherSuite::Type::from(u16::from(self.aead)),
             )
         })
         .is_ok()
@@ -66,7 +66,7 @@ impl Default for Config {
         Self {
             kem: KemAlgorithm::X25519Sha256,
             kdf: HkdfAlgorithm::HKDF_SHA2_256,
-            aead: AeadAlgorithms::Aes128Gcm,
+            aead: CipherSuite::Aes128Gcm,
         }
     }
 }
@@ -87,7 +87,7 @@ impl HpkeContext {
             p11::PK11_HPKE_NewContext(
                 KemAlgorithm::Type::from(u16::from(config.kem)),
                 HkdfAlgorithm::Type::from(u16::from(config.kdf)),
-                AeadAlgorithms::Type::from(u16::from(config.aead)),
+                CipherSuite::Type::from(u16::from(config.aead)),
                 null_mut(),
                 null(),
             )

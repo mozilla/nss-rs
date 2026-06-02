@@ -17,9 +17,14 @@ use std::{
 pub use recprot::AEAD_NULL_TAG;
 pub use recprot::RecordProtection;
 
+#[cfg(not(feature = "disable-encryption"))]
 use crate::{
-    Cipher, SECItemBorrowed, SymKey,
-    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    Cipher, Version,
+    hp::SSL_HkdfExpandLabelWithMech,
+    p11::{CKM_HKDF_DATA, PK11SymKey},
+};
+use crate::{
+    CipherSuite, SECItemBorrowed, SymKey,
     err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     p11::{
         self, CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE, CKA_DECRYPT,
@@ -27,12 +32,6 @@ use crate::{
         CKM_CHACHA20_POLY1305, Context, PK11_AEADOp, PK11_CreateContextBySymKey,
     },
     secstatus_to_res,
-};
-#[cfg(not(feature = "disable-encryption"))]
-use crate::{
-    Version,
-    hp::SSL_HkdfExpandLabelWithMech,
-    p11::{CKM_HKDF_DATA, PK11SymKey},
 };
 
 #[cfg(all(feature = "blapi", feature = "disable-encryption"))]
@@ -214,14 +213,7 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AeadAlgorithms {
-    Aes128Gcm,
-    Aes256Gcm,
-    ChaCha20Poly1305,
-}
-
-impl AeadAlgorithms {
+impl CipherSuite {
     #[must_use]
     pub const fn key_len(self) -> c_uint {
         match self {
@@ -239,18 +231,6 @@ impl AeadAlgorithms {
     }
 }
 
-impl TryFrom<Cipher> for AeadAlgorithms {
-    type Error = Error;
-    fn try_from(cipher: Cipher) -> Res<Self> {
-        match cipher {
-            TLS_AES_128_GCM_SHA256 => Ok(Self::Aes128Gcm),
-            TLS_AES_256_GCM_SHA384 => Ok(Self::Aes256Gcm),
-            TLS_CHACHA20_POLY1305_SHA256 => Ok(Self::ChaCha20Poly1305),
-            _ => Err(Error::UnsupportedCipher),
-        }
-    }
-}
-
 pub struct Aead {
     mode: Mode,
     ctx: Context,
@@ -258,7 +238,7 @@ pub struct Aead {
 }
 
 impl Aead {
-    pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
+    pub fn import_key(algorithm: CipherSuite, key: &[u8]) -> Result<SymKey, Error> {
         let slot = p11::Slot::internal().map_err(|_| Error::Internal)?;
 
         let key_item = SECItemBorrowed::wrap(key)?;
@@ -279,7 +259,7 @@ impl Aead {
 
     pub fn new(
         mode: Mode,
-        algorithm: AeadAlgorithms,
+        algorithm: CipherSuite,
         key: &SymKey,
         nonce_base: [u8; NONCE_LEN],
     ) -> Result<Self, Error> {
@@ -420,12 +400,15 @@ impl Aead {
 mod test {
     use test_fixture::fixture_init;
 
-    use crate::aead::{Aead, AeadAlgorithms, Mode, NONCE_LEN, SequenceNumber};
+    use crate::{
+        CipherSuite,
+        aead::{Aead, Mode, NONCE_LEN, SequenceNumber},
+    };
 
     /// Check that the first invocation of encryption matches expected values.
     /// Also check decryption of the same.
     fn check0(
-        algorithm: AeadAlgorithms,
+        algorithm: CipherSuite,
         key: &[u8],
         nonce: &[u8; NONCE_LEN],
         aad: &[u8],
@@ -445,7 +428,7 @@ mod test {
     }
 
     fn decrypt(
-        algorithm: AeadAlgorithms,
+        algorithm: CipherSuite,
         key: &[u8],
         nonce: &[u8; NONCE_LEN],
         seq: SequenceNumber,
@@ -479,12 +462,12 @@ mod test {
             0x04, 0xa2, 0x65, 0xba, 0x2e, 0xff, 0x4d, 0x82, 0x90, 0x58, 0xfb, 0x3f, 0x0f, 0x24,
             0x96, 0xba,
         ];
-        check0(AeadAlgorithms::Aes128Gcm, KEY, NONCE, AAD, &[], CT);
+        check0(CipherSuite::Aes128Gcm, KEY, NONCE, AAD, &[], CT);
     }
 
     #[test]
     fn quic_server_initial() {
-        const ALG: AeadAlgorithms = AeadAlgorithms::Aes128Gcm;
+        const ALG: CipherSuite = CipherSuite::Aes128Gcm;
         const KEY: &[u8] = &[
             0xcf, 0x3a, 0x53, 0x31, 0x65, 0x3c, 0x36, 0x4c, 0x88, 0xf0, 0xf3, 0x79, 0xb6, 0x06,
             0x7e, 0x37,
@@ -528,7 +511,7 @@ mod test {
 
     #[test]
     fn quic_chacha() {
-        const ALG: AeadAlgorithms = AeadAlgorithms::ChaCha20Poly1305;
+        const ALG: CipherSuite = CipherSuite::ChaCha20Poly1305;
         const KEY: &[u8] = &[
             0xc6, 0xd9, 0x8f, 0xf3, 0x44, 0x1c, 0x3f, 0xe1, 0xb2, 0x18, 0x20, 0x94, 0xf6, 0x9c,
             0xaa, 0x2e, 0xd4, 0xb7, 0x16, 0xb6, 0x54, 0x88, 0x96, 0x0a, 0x7a, 0x98, 0x49, 0x79,
@@ -553,7 +536,7 @@ mod test {
         decrypt(ALG, KEY, NONCE_BASE, 654_360_564, AAD, PT, CT);
     }
 
-    fn roundtrip_encrypt_with_seq(algorithm: AeadAlgorithms, key: &[u8]) {
+    fn roundtrip_encrypt_with_seq(algorithm: CipherSuite, key: &[u8]) {
         const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
         const AAD: &[u8] = b"associated";
         const PT: &[u8] = b"hello sframe";
@@ -573,18 +556,18 @@ mod test {
     #[test]
     fn encrypt_with_seq_aes128gcm() {
         const KEY: &[u8] = &[0x42; 16];
-        roundtrip_encrypt_with_seq(AeadAlgorithms::Aes128Gcm, KEY);
+        roundtrip_encrypt_with_seq(CipherSuite::Aes128Gcm, KEY);
     }
 
     #[test]
     fn encrypt_with_seq_aes256gcm() {
         const KEY: &[u8] = &[0x42; 32];
-        roundtrip_encrypt_with_seq(AeadAlgorithms::Aes256Gcm, KEY);
+        roundtrip_encrypt_with_seq(CipherSuite::Aes256Gcm, KEY);
     }
 
     #[test]
     fn encrypt_with_seq_chacha20poly1305() {
         const KEY: &[u8] = &[0x42; 32];
-        roundtrip_encrypt_with_seq(AeadAlgorithms::ChaCha20Poly1305, KEY);
+        roundtrip_encrypt_with_seq(CipherSuite::ChaCha20Poly1305, KEY);
     }
 }

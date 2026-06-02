@@ -13,7 +13,8 @@ use zeroize::ZeroizeOnDrop;
 
 use super::SAMPLE_SIZE;
 use crate::{
-    aead::{AeadAlgorithms, expand_label_buf},
+    CipherSuite,
+    aead::expand_label_buf,
     constants::{Cipher, Version},
     err::{Res, secstatus_to_res},
     freebl,
@@ -45,8 +46,8 @@ pub enum Key {
 
 impl Key {
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
-        Ok(match AeadAlgorithms::try_from(cipher)? {
-            AeadAlgorithms::Aes128Gcm => {
+        Ok(match CipherSuite::try_from(cipher)? {
+            CipherSuite::Aes128Gcm => {
                 // Named for aes_context; moves into Key (ZeroizeOnDrop), no Zeroizing needed.
                 let key_bytes: [u8; 16] = expand_label_buf(version, cipher, prk, label)?;
                 Self::Aes128 {
@@ -54,14 +55,14 @@ impl Key {
                     key_bytes,
                 }
             }
-            AeadAlgorithms::Aes256Gcm => {
+            CipherSuite::Aes256Gcm => {
                 let key_bytes: [u8; 32] = expand_label_buf(version, cipher, prk, label)?;
                 Self::Aes256 {
                     ctx: freebl::aes_context(&key_bytes, freebl::NSS_AES, true)?,
                     key_bytes,
                 }
             }
-            AeadAlgorithms::ChaCha20Poly1305 => {
+            CipherSuite::ChaCha20Poly1305 => {
                 Self::Chacha(expand_label_buf(version, cipher, prk, label)?)
             }
         })

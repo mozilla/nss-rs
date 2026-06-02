@@ -10,11 +10,11 @@ use std::{
 };
 
 use super::{
-    AeadAlgorithms, COUNTER_LEN, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, c_int_len,
-    expand_label, expand_label_buf, split_tag, xor_nonce,
+    COUNTER_LEN, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, c_int_len, expand_label,
+    expand_label_buf, split_tag, xor_nonce,
 };
 use crate::{
-    Cipher, Error, Res, SECItemBorrowed, SymKey, Version,
+    Cipher, CipherSuite, Error, Res, SECItemBorrowed, SymKey, Version,
     err::{sec::SEC_ERROR_BAD_DATA, secstatus_to_res},
     p11::{
         CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE, CKG_NO_GENERATE, Context,
@@ -23,7 +23,7 @@ use crate::{
 };
 
 fn cipher_mech_and_key_len(cipher: Cipher) -> Res<(CK_MECHANISM_TYPE, c_uint)> {
-    let spec = AeadAlgorithms::try_from(cipher)?;
+    let spec = CipherSuite::try_from(cipher)?;
     Ok((spec.p11_mech(), spec.key_len()))
 }
 
