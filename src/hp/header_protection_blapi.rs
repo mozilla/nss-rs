@@ -47,6 +47,7 @@ impl Key {
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
         Ok(match AeadAlgorithms::try_from(cipher)? {
             AeadAlgorithms::Aes128Gcm => {
+                // Named for aes_context; moves into Key (ZeroizeOnDrop), no Zeroizing needed.
                 let key_bytes: [u8; 16] = expand_label_buf(version, cipher, prk, label)?;
                 Self::Aes128 {
                     ctx: freebl::aes_context(&key_bytes, freebl::NSS_AES, true)?,
@@ -61,8 +62,7 @@ impl Key {
                 }
             }
             AeadAlgorithms::ChaCha20Poly1305 => {
-                let key_bytes: [u8; 32] = expand_label_buf(version, cipher, prk, label)?;
-                Self::Chacha(key_bytes)
+                Self::Chacha(expand_label_buf(version, cipher, prk, label)?)
             }
         })
     }

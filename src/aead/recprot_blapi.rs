@@ -15,6 +15,8 @@ use std::{
     os::raw::{c_uint, c_ulong},
 };
 
+use zeroize::{ZeroizeOnDrop, Zeroizing};
+
 use super::{
     AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, split_tag,
     xor_nonce,
@@ -138,7 +140,11 @@ unsafe fn aead_op(
     Ok(usize::try_from(out_len)?)
 }
 
+// blapi holds nonce_base outside NSS-managed memory, so zero it on drop;
+// the PKCS#11 backend relies on the SymKey lifecycle for this instead.
+#[derive(ZeroizeOnDrop)]
 pub struct RecordProtection {
+    #[zeroize(skip)]
     cipher: RecordCipher,
     nonce_base: [u8; NONCE_LEN],
 }
@@ -156,29 +162,33 @@ impl RecordProtection {
         prefix: &str,
         mode: Mode,
     ) -> Res<Self> {
+        // Moves into RecordProtection (ZeroizeOnDrop), no Zeroizing needed.
         let nonce_base: [u8; NONCE_LEN] =
             expand_label_buf(version, cipher, secret, &format!("{prefix}iv"))?;
         let key_label = format!("{prefix}key");
 
         let record_cipher = match AeadAlgorithms::try_from(cipher)? {
             AeadAlgorithms::Aes128Gcm => {
-                let key: [u8; 16] = expand_label_buf(version, cipher, secret, &key_label)?;
+                let key =
+                    Zeroizing::new(expand_label_buf::<16>(version, cipher, secret, &key_label)?);
                 RecordCipher::Aes(freebl::aes_context(
-                    &key,
+                    &key[..],
                     freebl::NSS_AES_GCM,
                     mode == Mode::Encrypt,
                 )?)
             }
             AeadAlgorithms::Aes256Gcm => {
-                let key: [u8; 32] = expand_label_buf(version, cipher, secret, &key_label)?;
+                let key =
+                    Zeroizing::new(expand_label_buf::<32>(version, cipher, secret, &key_label)?);
                 RecordCipher::Aes(freebl::aes_context(
-                    &key,
+                    &key[..],
                     freebl::NSS_AES_GCM,
                     mode == Mode::Encrypt,
                 )?)
             }
             AeadAlgorithms::ChaCha20Poly1305 => {
-                let key: [u8; 32] = expand_label_buf(version, cipher, secret, &key_label)?;
+                let key =
+                    Zeroizing::new(expand_label_buf::<32>(version, cipher, secret, &key_label)?);
                 let ctx = ChaCha20Ctx::from_ptr(unsafe {
                     freebl::ChaCha20Poly1305_CreateContext(key.as_ptr(), 32, TAG_LEN_C)
                 })?;
