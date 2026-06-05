@@ -238,6 +238,28 @@ fn maybe_link_freebl3() {
     }
 }
 
+/// Emit the library link and search-path for freebl3 in a Gecko build.
+#[cfg(feature = "gecko")]
+fn maybe_link_freebl3_gecko(topobjdir: &std::path::Path, fold_libs: bool) {
+    if env::var("CARGO_FEATURE_BLAPI").is_err() {
+        return;
+    }
+    println!("cargo:rustc-link-lib=dylib=freebl3");
+    let search = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        topobjdir
+            .join("security")
+            .join("nss")
+            .join("lib")
+            .join("freebl")
+            .join("freebl_freebl3")
+    } else if fold_libs {
+        topobjdir.join("dist").join("bin")
+    } else {
+        return;
+    };
+    println!("cargo:rustc-link-search=native={}", search.display());
+}
+
 fn static_link() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let mut static_libs = vec![
@@ -514,33 +536,26 @@ fn setup_for_gecko() -> Vec<String> {
         println!("cargo:rustc-link-lib=dylib={}", lib);
     }
 
-    maybe_link_freebl3();
+    maybe_link_freebl3_gecko(TOPOBJDIR, fold_libs);
 
     if fold_libs {
         println!(
             "cargo:rustc-link-search=native={}",
-            TOPOBJDIR.join("security").to_str().unwrap()
+            TOPOBJDIR.join("security").display()
         );
-        if env::var("CARGO_FEATURE_BLAPI").is_ok() {
-            // freebl3 is not folded into nss3; it lives in dist/bin.
-            println!(
-                "cargo:rustc-link-search=native={}",
-                TOPOBJDIR.join("dist").join("bin").to_str().unwrap()
-            );
-        }
     } else {
         println!(
             "cargo:rustc-link-search=native={}",
-            TOPOBJDIR.join("dist").join("bin").to_str().unwrap()
+            TOPOBJDIR.join("dist").join("bin").display()
         );
         let nsslib_path = TOPOBJDIR.join("security").join("nss").join("lib");
         println!(
             "cargo:rustc-link-search=native={}",
-            nsslib_path.join("nss").join("nss_nss3").to_str().unwrap()
+            nsslib_path.join("nss").join("nss_nss3").display()
         );
         println!(
             "cargo:rustc-link-search=native={}",
-            nsslib_path.join("ssl").join("ssl_ssl3").to_str().unwrap()
+            nsslib_path.join("ssl").join("ssl_ssl3").display()
         );
         println!(
             "cargo:rustc-link-search=native={}",
@@ -549,8 +564,7 @@ fn setup_for_gecko() -> Vec<String> {
                 .join("external")
                 .join("nspr")
                 .join("pr")
-                .to_str()
-                .unwrap()
+                .display()
         );
     }
 
