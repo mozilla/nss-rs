@@ -240,7 +240,7 @@ fn maybe_link_freebl3() {
 
 /// Emit the library link and search-path for freebl3 in a Gecko build.
 #[cfg(feature = "gecko")]
-fn maybe_link_freebl3_gecko(topobjdir: &std::path::Path, fold_libs: bool) {
+fn maybe_link_freebl3_gecko(topobjdir: &Path, fold_libs: bool) {
     if env::var("CARGO_FEATURE_BLAPI").is_err() {
         return;
     }
