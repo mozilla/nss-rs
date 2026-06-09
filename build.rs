@@ -441,13 +441,6 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
     }
 
     if env::var("CARGO_FEATURE_BLAPI").is_ok() {
-        let dylib_ext = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-            "dylib"
-        } else {
-            "so"
-        };
-        let freebl_lib = format!("libfreebl3.{dylib_ext}");
-
         // pkg-config omits -L for default system library paths (e.g., /usr/lib64 on
         // RHEL/Fedora), so also include the libdir from the .pc file.
         if let Ok(output) = Command::new("pkg-config")
@@ -465,12 +458,6 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
                 }
             }
         }
-
-        assert!(
-            lib_dirs.iter().any(|dir| dir.join(&freebl_lib).exists()),
-            "blapi feature requires {freebl_lib} in the pkg-config \
-             library paths. Set NSS_DIR to a standalone NSS source build."
-        );
     }
     maybe_link_freebl3();
 
