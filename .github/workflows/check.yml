@@ -212,28 +212,34 @@ jobs:
       matrix:
         include:
           - name: Fedora
-            container: fedora@sha256:498c452f32a739b61f0ef215bce9924ebc4866cbe44710f58157d77723b7a6d2
+            # renovate: depName=fedora datasource=docker
+            container: fedora:42@sha256:498c452f32a739b61f0ef215bce9924ebc4866cbe44710f58157d77723b7a6d2
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
-            container: opensuse/tumbleweed@sha256:003da6756e3daced6f62ece3d6dc436d21572fb05e558172fc552b6aa1b044ab
+            # renovate: depName=opensuse/tumbleweed datasource=docker
+            container: opensuse/tumbleweed:latest@sha256:003da6756e3daced6f62ece3d6dc436d21572fb05e558172fc552b6aa1b044ab
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
-            container: archlinux@sha256:1047e6e7878d58e4ee47e1cd6459a32fab41246b0efc4109e11b7ef16f50b14d
+            # renovate: depName=archlinux datasource=docker
+            container: archlinux:latest@sha256:1047e6e7878d58e4ee47e1cd6459a32fab41246b0efc4109e11b7ef16f50b14d
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
           - name: Alpine
-            container: alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
+            # renovate: depName=alpine datasource=docker
+            container: alpine:latest@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
             install: apk add --no-cache git nss-dev clang-dev pkgconf gcc musl-dev curl
             # rustup binaries are statically linked, which prevents bindgen from dlopen-ing libclang.
             # Disabling -crt-static makes them dynamically linked.
             rustflags: "-C target-feature=-crt-static"
           - name: Gentoo
-            container: gentoo/stage3@sha256:ed86fc4f53b75eabefa3eb78fdf7e0db66ca0b3b2eddc4692e16d3d7df94e198
+            # renovate: depName=gentoo/stage3 datasource=docker
+            container: gentoo/stage3:latest@sha256:ed86fc4f53b75eabefa3eb78fdf7e0db66ca0b3b2eddc4692e16d3d7df94e198
             install: >-
               emerge-webrsync -q &&
               emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
               ACCEPT_KEYWORDS="~amd64" emerge -q --getbinpkg --quiet-build=y -1 dev-libs/nss
           - name: Slackware
-            container: aclemons/slackware@sha256:f51515e0e9073f0cbd499677c08cd219c2706d6243ad64552a5eba56f42a57fd
+            # renovate: depName=aclemons/slackware datasource=docker
+            container: aclemons/slackware:current-full@sha256:f51515e0e9073f0cbd499677c08cd219c2706d6243ad64552a5eba56f42a57fd
             # current-full ships a complete Slackware installation including all deps
             install: ":"
     defaults:
@@ -278,7 +284,8 @@ jobs:
       - name: Build feature powerset
         run: |
           . "$HOME/.cargo/env"
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.20.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 

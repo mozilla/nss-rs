@@ -1,0 +1,27 @@
+name: Renovate
+on:
+  schedule:
+    - cron: "0 0 * * 1" # Weekly on Monday
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  renovate:
+    name: Renovate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {} # PAT carries all required permissions; GITHUB_TOKEN is unused
+    steps:
+      - name: Run Renovate
+        run: |
+          docker run --rm \
+            -e RENOVATE_TOKEN \
+            renovate/renovate \
+            mozilla/nss-rs
+        env:
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE }} # zizmor: ignore[secrets-outside-env]

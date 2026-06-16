@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "prHourlyLimit": 0,
+  "dependencyDashboard": false,
+  "gitAuthor": "Lars Eggert <200328+larseggert@users.noreply.github.com>",
+  "enabledManagers": ["custom.regex"],
+  "customManagers": [
+    {
+      "description": "Pinned versions annotated with '# renovate: depName=X datasource=Y'",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.*\\.yml$/",
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+container:\\s*\\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*cargo install \\S+?@(?<currentValue>[0-9][0-9.]*)",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*llvm-(?<currentValue>[0-9.]+)p[0-9]+",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDepNames": ["llvm/llvm-project"],
+      "extractVersion": "^llvmorg-(?<version>\\d+\\.\\d+\\.\\d+)$",
+      "prBodyNotes": [
+        "⚠️ **Manual step**: verify/adjust the OpenBSD package patch suffix (`pN`) in `llvm-{{newVersion}}pN` — it is not tracked upstream and may differ from `p4`."
+      ]
+    },
+    {
+      "matchDepNames": ["cargo-bins/cargo-binstall"],
+      "extractVersion": "^v?(?<version>.+)$"
+    }
+  ]
+}
