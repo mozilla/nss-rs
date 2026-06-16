@@ -33,7 +33,7 @@ runs:
           case "$PLATFORM" in
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
-            openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
+            openbsd)    # renovate: depName=llvm/llvm-project datasource=github-releases
                         pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.8p4 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
@@ -82,7 +82,8 @@ runs:
           # Generate bindings first if requested (before build, so we can bootstrap)
           if [ -n "$BINDGEN_ARGS" ]; then
             # Solaris doesn't have a system package for bindgen
-            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
+            # renovate: depName=bindgen-cli datasource=crate
+            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli@0.72.1 --locked
             echo "$BINDGEN_ARGS" | xargs bindgen src/bindings/bsd.h > "$PLATFORM.rs"
             # Compare generated bindings with committed bindings.
             # If different, exit early — there's no point compiling with stale
@@ -102,9 +103,11 @@ runs:
                         ;;
           esac
           cargo fmt --all -- --check
-          cargo install cargo-hack --locked
+          # renovate: depName=cargo-hack datasource=crate
+          cargo install cargo-hack@0.6.45 --locked
           case "$PLATFORM" in
-            freebsd)    cargo install cargo-llvm-cov --locked
+            # renovate: depName=cargo-llvm-cov datasource=crate
+            freebsd)    cargo install cargo-llvm-cov@0.8.7 --locked
                         cargo llvm-cov test --locked --no-fail-fast --codecov --output-path codecov.json
                         ;;
             *)          # FIXME: No profiler support on other platforms, error is: cannot find crate for profiler_builtins
