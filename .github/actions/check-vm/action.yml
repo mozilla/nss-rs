@@ -33,7 +33,7 @@ runs:
           case "$PLATFORM" in
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
-            openbsd)    # renovate: depName=llvm/llvm-project datasource=github-releases
+            openbsd)    # renovate: depName=llvm datasource=openbsd-packages registryUrl=https://cdn.openbsd.org/pub/OpenBSD/7.9/packages/amd64/
                         pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.8p4 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
@@ -130,6 +130,8 @@ runs:
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@a6de9343ef5747433d9c25784c90e84998b9d69a # v1.4.6
       with:
+        # renovate: depName=freebsd datasource=freebsd-releases
+        release: "15.0"
         usesh: true
         disable-cache: true
         copyback: true
@@ -140,6 +142,8 @@ runs:
     - if: ${{ inputs.platform == 'openbsd' }}
       uses: vmactions/openbsd-vm@fcf799d7ce9c305ad89eabef1fb2fa5c1c42d0ee # v1.4.3
       with:
+        # renovate: depName=openbsd datasource=openbsd-releases
+        release: "7.9"
         usesh: true
         disable-cache: true
         copyback: true
@@ -150,6 +154,8 @@ runs:
     - if: ${{ inputs.platform == 'netbsd' }}
       uses: vmactions/netbsd-vm@99816dccf75edf233ed6cd00a159e3a5b85ea373 # v1.4.0
       with:
+        # renovate: depName=netbsd datasource=netbsd-releases
+        release: "10.1"
         usesh: true
         disable-cache: true
         copyback: true

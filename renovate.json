@@ -1,10 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "prHourlyLimit": 0,
   "dependencyDashboard": false,
   "gitAuthor": "Lars Eggert <200328+larseggert@users.noreply.github.com>",
-  "enabledManagers": ["custom.regex"],
+  "enabledManagers": [
+    "custom.regex"
+  ],
   "customManagers": [
     {
       "description": "Pinned versions annotated with '# renovate: depName=X datasource=Y'",
@@ -16,22 +20,89 @@
       "matchStrings": [
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+container:\\s*\\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*cargo install \\S+?@(?<currentValue>[0-9][0-9.]*)",
-        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*llvm-(?<currentValue>[0-9.]+)p[0-9]+",
-        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/"
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm-(?<currentValue>[0-9.]+(?:p[0-9]+)?)",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+release: \"(?<currentValue>[0-9]+\\.[0-9]+)\""
       ]
     }
   ],
   "packageRules": [
     {
-      "matchDepNames": ["llvm/llvm-project"],
-      "extractVersion": "^llvmorg-(?<version>\\d+\\.\\d+\\.\\d+)$",
-      "prBodyNotes": [
-        "⚠️ **Manual step**: verify/adjust the OpenBSD package patch suffix (`pN`) in `llvm-{{newVersion}}pN` — it is not tracked upstream and may differ from `p4`."
-      ]
+      "matchDepNames": [
+        "llvm"
+      ],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:p(?<build>\\d+))?$",
+      "postUpgradeTasks": {
+        "commands": [
+          "sed -i 's|/usr/local/llvm{{{currentMajor}}}/|/usr/local/llvm{{{newMajor}}}/|g' .github/actions/check-vm/action.yml"
+        ],
+        "fileFilters": [
+          ".github/actions/check-vm/action.yml"
+        ],
+        "executionMode": "update"
+      }
     },
     {
-      "matchDepNames": ["cargo-bins/cargo-binstall"],
+      "matchDepNames": [
+        "cargo-bins/cargo-binstall"
+      ],
       "extractVersion": "^v?(?<version>.+)$"
+    },
+    {
+      "matchDepNames": [
+        "openbsd"
+      ],
+      "versioning": "loose",
+      "postUpgradeTasks": {
+        "commands": [
+          "sed -i 's|/OpenBSD/{{{currentVersion}}}/|/OpenBSD/{{{newVersion}}}/|g' .github/actions/check-vm/action.yml"
+        ],
+        "fileFilters": [
+          ".github/actions/check-vm/action.yml"
+        ],
+        "executionMode": "update"
+      }
+    },
+    {
+      "matchDepNames": [
+        "freebsd"
+      ],
+      "versioning": "loose"
+    },
+    {
+      "matchDepNames": [
+        "netbsd"
+      ],
+      "versioning": "loose"
     }
-  ]
+  ],
+  "customDatasources": {
+    "openbsd-packages": {
+      "format": "html",
+      "transformTemplates": [
+        "{\"releases\": releases[$match(version, /^llvm-\\d+\\.\\d+\\.\\d+(p\\d+)?\\.tgz$/)].{\"version\": $replace($replace(version, /^llvm-/, \"\"), /\\.tgz$/, \"\")}}"
+      ]
+    },
+    "openbsd-releases": {
+      "defaultRegistryUrlTemplate": "https://cdn.openbsd.org/pub/OpenBSD/",
+      "format": "html",
+      "transformTemplates": [
+        "{\"releases\": releases[$match(version, /^\\d+\\.\\d+\\//)].{\"version\": $replace(version, /\\/$/, \"\")}}"
+      ]
+    },
+    "freebsd-releases": {
+      "defaultRegistryUrlTemplate": "https://download.freebsd.org/releases/amd64/amd64/",
+      "format": "html",
+      "transformTemplates": [
+        "{\"releases\": releases[$match(version, /^\\d+[.]\\d+-RELEASE[/]/)].{\"version\": $replace(version, /-RELEASE[/]$/, \"\")}}"
+      ]
+    },
+    "netbsd-releases": {
+      "defaultRegistryUrlTemplate": "https://cdn.netbsd.org/pub/NetBSD/",
+      "format": "html",
+      "transformTemplates": [
+        "{\"releases\": releases[$match(version, /^NetBSD-\\d+[.]\\d+[/]$/)].{\"version\": $replace($replace(version, /^NetBSD-/, \"\"), /[/]$/, \"\")}}"
+      ]
+    }
+  }
 }
