@@ -31,7 +31,7 @@ jobs:
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
@@ -73,7 +73,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
@@ -144,7 +144,7 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -167,7 +167,7 @@ jobs:
     name: Ensure `Cargo.lock` contains all required dependencies
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
@@ -186,7 +186,7 @@ jobs:
       matrix:
         target: ["x86_64-linux-android", "aarch64-linux-android"]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - id: nss-version
@@ -230,10 +230,11 @@ jobs:
             container: gentoo/stage3@sha256:ed86fc4f53b75eabefa3eb78fdf7e0db66ca0b3b2eddc4692e16d3d7df94e198
             install: >-
               emerge-webrsync -q &&
-              emerge -q --getbinpkg --quiet-build=y -1 dev-lang/rust llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
+              emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
               ACCEPT_KEYWORDS="~amd64" emerge -q --getbinpkg --quiet-build=y -1 dev-libs/nss
           - name: Slackware
             container: aclemons/slackware@sha256:f51515e0e9073f0cbd499677c08cd219c2706d6243ad64552a5eba56f42a57fd
+            # current-full ships a complete Slackware installation including all deps
             install: ":"
     defaults:
       run:
@@ -244,9 +245,9 @@ jobs:
       - name: Install system dependencies (${{ matrix.name }})
         env:
           INSTALL: ${{ matrix.install }}
-        run: sh -c "$INSTALL"
+        run: sh -ec "$INSTALL"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
@@ -257,6 +258,7 @@ jobs:
           if [ -n "$CLANG_LIB" ]; then
             echo "LIBCLANG_PATH=$(dirname "$CLANG_LIB")" >> "$GITHUB_ENV"
           fi
+
       - name: Install Rust
         run: |
           if command -v rustup > /dev/null 2>&1; then
@@ -265,6 +267,8 @@ jobs:
           else
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable --profile minimal -y
           fi
+          mkdir -p "$HOME/.cargo"
+          [ -f "$HOME/.cargo/env" ] || touch "$HOME/.cargo/env"
 
       - name: Build
         run: |
@@ -289,7 +293,7 @@ jobs:
       matrix:
         os: [freebsd, netbsd, openbsd] # NSS package on 'solaris' is too old.
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm
