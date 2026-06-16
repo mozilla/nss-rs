@@ -34,7 +34,7 @@ runs:
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # renovate: depName=llvm/llvm-project datasource=github-releases
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-22.1.7p4 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-22.1.7p2 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
