@@ -56,9 +56,9 @@ runs:
           cd "$WD"
           pwd
           case "$PLATFORM" in
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
-                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm22/lib
+                        export LLVM_COV=/usr/local/llvm22/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm22/bin/llvm-profdata
                         export PATH="\$HOME/.cargo/bin:\$PATH"
                         ;;
             *)          sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
