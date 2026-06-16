@@ -221,7 +221,7 @@ jobs:
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
-            container: archlinux:latest@sha256:1047e6e7878d58e4ee47e1cd6459a32fab41246b0efc4109e11b7ef16f50b14d
+            container: archlinux:latest@sha256:ff410a88e200b133e577f5730b7bfa324e26a333075ee056bf45e911c6ac5671
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
           - name: Alpine
             # renovate: depName=alpine datasource=docker
