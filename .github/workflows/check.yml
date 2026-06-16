@@ -213,7 +213,7 @@ jobs:
         include:
           - name: Fedora
             # renovate: depName=fedora datasource=docker
-            container: fedora:42@sha256:498c452f32a739b61f0ef215bce9924ebc4866cbe44710f58157d77723b7a6d2
+            container: fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
