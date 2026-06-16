@@ -103,6 +103,11 @@ jobs:
           # require lockfile re-resolution in a workspace.
           cargo hack check $BUILD_TYPE --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
+      - name: Build
+        run: |
+          # shellcheck disable=SC2086
+          cargo build $BUILD_TYPE --locked --all-targets
+
       - name: Run tests and determine coverage
         env:
           RUST_LOG: trace
@@ -207,6 +212,11 @@ jobs:
     # which the Ubuntu CI runners don't exercise.
     # Allow failures in merge queue in case distro NSS lags our minimum version.
     continue-on-error: ${{ github.event_name == 'merge_group' }}
+    env:
+      # Needed for Alpine (musl): rustup binaries are statically linked, which prevents
+      # bindgen from dlopen-ing libclang. Disabling -crt-static makes them dynamically
+      # linked. Empty for all other distros (no effect).
+      RUSTFLAGS: ${{ matrix.rustflags || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -220,6 +230,24 @@ jobs:
           - name: Arch Linux
             container: archlinux@sha256:1047e6e7878d58e4ee47e1cd6459a32fab41246b0efc4109e11b7ef16f50b14d
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
+          - name: Alpine
+            container: alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
+            install: apk add --no-cache git nss-dev clang-dev pkgconf gcc musl-dev curl
+            rustflags: "-C target-feature=-crt-static"
+          - name: Gentoo
+            container: gentoo/stage3@sha256:ed86fc4f53b75eabefa3eb78fdf7e0db66ca0b3b2eddc4692e16d3d7df94e198
+            install: >-
+              emerge-webrsync &&
+              emerge --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
+              ACCEPT_KEYWORDS="~amd64" emerge --getbinpkg --quiet-build=y -1 dev-libs/nss
+          - name: Slackware
+            container: aclemons/slackware@sha256:91108de22ba8ccefc872197acc1864db094e20eb3aba9542ad02221d6d4ad918
+            install: >-
+              echo 'check-certificate = off' >> /etc/wgetrc &&
+              printf 'CHECKGPG=off\n' >> /etc/slackpkg/slackpkg.conf &&
+              echo 'https://mirrors.slackware.com/slackware/slackware64-current/' > /etc/slackpkg/mirrors &&
+              slackpkg -batch=on -default_answer=y update &&
+              slackpkg -batch=on -default_answer=y install mozilla-nss llvm pkg-config git gcc curl
     defaults:
       run:
         shell: sh
@@ -229,19 +257,33 @@ jobs:
       - name: Install system dependencies (${{ matrix.name }})
         env:
           INSTALL: ${{ matrix.install }}
-        run: $INSTALL
+        run: sh -c "$INSTALL"
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Set LIBCLANG_PATH (Gentoo)
+        if: matrix.name == 'Gentoo'
+        run: |
+          CLANG_LIB=$(find /usr/lib/llvm -name 'libclang.so' | head -1)
+          echo "LIBCLANG_PATH=$(dirname "$CLANG_LIB")" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.cargo"
+          : > "$HOME/.cargo/env"
+
       - name: Install Rust
+        if: matrix.name != 'Gentoo'
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable --profile minimal -y
 
       - name: Check
         run: |
           . "$HOME/.cargo/env"
           cargo check --locked --all-targets
+
+      - name: Build
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --locked --all-targets
 
       - name: Check feature powerset
         run: |
