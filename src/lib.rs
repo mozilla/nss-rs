@@ -141,7 +141,7 @@ fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
     // Set time zero.
     time::init();
     version_check()?;
-    #[cfg(feature = "blapi")]
+    #[cfg(all(not(feature = "disable-encryption"), feature = "blapi"))]
     freebl::init()?;
 
     if unsafe { nss::NSS_IsInitialized() != 0 } {

@@ -165,19 +165,6 @@ mod nspr_lib {
     include!(concat!(env!("OUT_DIR"), "/nspr_lib.rs"));
 }
 
-// Library names from NSS's blname.c.
-#[cfg(all(feature = "gecko", target_os = "linux"))]
-const FREEBL_LIB: &CStr = c"libfreeblpriv3.so";
-#[cfg(all(feature = "gecko", target_os = "macos"))]
-const FREEBL_LIB: &CStr = c"libfreebl3.dylib";
-#[cfg(all(feature = "gecko", windows))]
-const FREEBL_LIB: &CStr = c"freebl3.dll";
-#[cfg(all(
-    feature = "gecko",
-    not(any(target_os = "linux", target_os = "macos", windows))
-))]
-const FREEBL_LIB: &CStr = c"libfreebl3.so";
-
 #[cfg(not(feature = "gecko"))]
 unsafe extern "C" {
     fn FREEBL_GetVector() -> *const FREEBLVectorStr;
@@ -246,24 +233,40 @@ fn load_freebl_fns() -> Res<FreeblFns> {
 // Use NSPR (matching NSS's own loader.c) rather than a direct link.
 #[cfg(feature = "gecko")]
 fn freebl_vector() -> Res<*const FREEBLVectorStr> {
-    use nspr_lib::{PR_FindFunctionSymbol, PR_LoadLibrary};
+    use nspr_lib::{PR_FindFunctionSymbol, PR_LoadLibrary, PR_UnloadLibrary};
     type GetVectorFn = unsafe extern "C" fn() -> *const FREEBLVectorStr;
-    let handle = unsafe { PR_LoadLibrary(FREEBL_LIB.as_ptr().cast()) };
-    if handle.is_null() {
-        error!(
-            "freebl: failed to load {}",
-            FREEBL_LIB.to_str().unwrap_or("?")
-        );
-        return Err(Error::Internal);
-    }
-    let sym = unsafe { PR_FindFunctionSymbol(handle, c"FREEBL_GetVector".as_ptr().cast()) };
-    // SAFETY: sym is FREEBL_GetVector; transmute needed for data-ptr → fn-ptr.
-    let f: GetVectorFn = unsafe {
-        std::mem::transmute(sym.ok_or_else(|| {
-            error!("freebl: FREEBL_GetVector not found");
-            Error::Internal
-        })?)
+
+    // Library names in preference order, from NSS's blname.c.
+    let libs: &[&CStr] = if cfg!(target_os = "linux") {
+        &[c"libfreeblpriv3.so", c"libfreebl3.so"]
+    } else if cfg!(target_os = "macos") {
+        &[c"libfreebl3.dylib"]
+    } else if cfg!(windows) {
+        &[c"freebl3.dll"]
+    } else {
+        &[c"libfreebl3.so"]
     };
+
+    let handle = libs
+        .iter()
+        .find_map(|lib| {
+            let h = unsafe { PR_LoadLibrary(lib.as_ptr().cast()) };
+            (!h.is_null()).then_some(h)
+        })
+        .ok_or_else(|| {
+            error!("freebl: failed to load any of {:?}", libs);
+            Error::Internal
+        })?;
+
+    let sym = unsafe { PR_FindFunctionSymbol(handle, c"FREEBL_GetVector".as_ptr().cast()) };
+    let Some(sym) = sym else {
+        error!("freebl: FREEBL_GetVector not found");
+        let _ = unsafe { PR_UnloadLibrary(handle) };
+        return Err(Error::Internal);
+    };
+
+    // SAFETY: sym is FREEBL_GetVector; transmute needed for data-ptr → fn-ptr.
+    let f: GetVectorFn = unsafe { std::mem::transmute(sym) };
     Ok(unsafe { f() })
 }
 
