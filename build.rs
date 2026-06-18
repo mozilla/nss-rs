@@ -627,7 +627,7 @@ fn main() {
         setup_for_gecko()
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
-    } else if env::var("CARGO_FEATURE_STATIC").is_ok() {
+    } else if cfg!(feature = "static") {
         setup_standalone(nss_dir())
     } else {
         pkg_config().unwrap_or_else(|_| setup_standalone(nss_dir()))
