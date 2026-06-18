@@ -147,6 +147,7 @@ blapi = ["dep:zeroize"]
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
+static = [] # Link NSS statically.
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

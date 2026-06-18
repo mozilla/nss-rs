@@ -491,6 +491,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
         || env::var("PROFILE").unwrap_or_default() == "debug"
         // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
         || env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
+        || env::var("CARGO_FEATURE_STATIC").is_ok()
     {
         static_link();
     } else {
@@ -626,6 +627,8 @@ fn main() {
         setup_for_gecko()
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
+    } else if env::var("CARGO_FEATURE_STATIC").is_ok() {
+        setup_standalone(nss_dir())
     } else {
         pkg_config().unwrap_or_else(|_| setup_standalone(nss_dir()))
     };
