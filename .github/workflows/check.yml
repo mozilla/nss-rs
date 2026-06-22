@@ -285,7 +285,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.20.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.20.1/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
