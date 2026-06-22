@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+        uses: mozilla/actions/toolchains@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
 
   check:
     name: Run checks
@@ -77,14 +77,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }} cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version-file: min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: stable
           tools: cargo-hack
@@ -217,7 +217,7 @@ jobs:
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
-            container: opensuse/tumbleweed:latest@sha256:3c010f9f5fa42e73ccfbdc4574b98863696d626f00dddfb7874e3601e6d70138
+            container: opensuse/tumbleweed:latest@sha256:b88a9a5481a1bf5e15dddce7ccafa34d02db7196c2a09a9222ff09c12919ee64
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
@@ -239,7 +239,7 @@ jobs:
               ACCEPT_KEYWORDS="~amd64" emerge -q --getbinpkg --quiet-build=y -1 dev-libs/nss
           - name: Slackware
             # renovate: depName=aclemons/slackware datasource=docker
-            container: aclemons/slackware:current-full@sha256:fbf870097fd511ee0889db3390729cdea051f875710f72d552e725d08dc19c59
+            container: aclemons/slackware:current-full@sha256:22ab05af2c07012cfe2a19128406d5159d3d0c7a52038ca8c48db94264ab1b7e
             # current-full ships a complete Slackware installation including all deps
             install: ":"
     defaults:
@@ -285,7 +285,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.20.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.20.1/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
