@@ -6,7 +6,7 @@
 
 #![allow(non_camel_case_types)]
 
-use std::{convert::TryFrom as _, ptr};
+use std::ptr;
 
 use pkcs11_bindings::CKA_SIGN;
 

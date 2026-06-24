@@ -9,7 +9,7 @@
 pub mod agent;
 mod agentio;
 mod auth;
-mod cert;
+pub mod cert;
 pub mod constants;
 mod ech;
 #[macro_use]
@@ -62,6 +62,7 @@ pub use self::{
         ZeroRttChecker,
     },
     auth::AuthenticationStatus,
+    cert::CertificateCompressor,
     constants::*,
     ech::{
         AeadId, KdfId, KemId, SymmetricSuite, encode_config as encode_ech_config,
