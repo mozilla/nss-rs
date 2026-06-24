@@ -11,7 +11,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom as _,
     fmt::{self, Debug, Formatter},
     os::raw::{c_uint, c_void},
     pin::Pin,

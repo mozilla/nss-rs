@@ -13,7 +13,6 @@
 )]
 use std::{
     cell::RefCell,
-    convert::TryFrom as _,
     fmt::{self, Debug, Formatter},
     os::raw::{c_int, c_uint},
     ptr::null_mut,

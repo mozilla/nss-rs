@@ -4,7 +4,7 @@ use nss_rs::{
     AuthenticationStatus, Client, Error, HandshakeState, Res, SecretAgentPreInfo, Server,
     TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
-    agent::CertificateCompressor, generate_ech_keys,
+    cert::CertificateCompressor, generate_ech_keys,
 };
 
 mod handshake;
