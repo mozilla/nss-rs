@@ -232,7 +232,7 @@ jobs:
             rustflags: "-C target-feature=-crt-static"
           - name: Gentoo
             # renovate: depName=gentoo/stage3 datasource=docker
-            container: gentoo/stage3:latest@sha256:ed86fc4f53b75eabefa3eb78fdf7e0db66ca0b3b2eddc4692e16d3d7df94e198
+            container: gentoo/stage3:latest@sha256:fa6706f105c1e8611a54b00b84a371465ab2f71f3d0423f48071db829045cdb4
             install: >-
               emerge-webrsync -q &&
               emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
