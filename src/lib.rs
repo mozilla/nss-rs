@@ -154,10 +154,11 @@ fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
         }
         let pathstr = path.to_str().ok_or(Error::Internal)?;
         let dircstr = CString::new(pathstr)?;
+        let db_dircstr = CString::new(format!("sql:{pathstr}"))?;
         let empty = CString::new("")?;
         secstatus_to_res(unsafe {
             nss::NSS_Initialize(
-                dircstr.as_ptr(),
+                db_dircstr.as_ptr(),
                 empty.as_ptr(),
                 empty.as_ptr(),
                 nss::SECMOD_DB.as_ptr().cast(),
