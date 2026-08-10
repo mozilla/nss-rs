@@ -15,11 +15,12 @@ use std::{
     cell::RefCell,
     convert::TryFrom as _,
     fmt::{self, Debug, Formatter},
-    os::raw::{c_int, c_uint},
+    os::raw::c_int,
     ptr::null_mut,
 };
 
 use pkcs11_bindings::{CKA_EC_POINT, CKA_VALUE};
+use strum::FromRepr;
 
 use crate::{
     err::{Error, Res, secstatus_to_res},
@@ -69,34 +70,53 @@ scoped_ptr!(
     SECKEY_DestroySubjectPublicKeyInfo
 );
 
+/// Public or private key type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+#[repr(u32)]
+pub enum KeyType {
+    Null = KeyType_nullKey,
+    Rsa = KeyType_rsaKey,
+    Dsa = KeyType_dsaKey,
+    Fortezza = KeyType_fortezzaKey,
+    Dh = KeyType_dhKey,
+    Kea = KeyType_keaKey,
+    Ec = KeyType_ecKey,
+    RsaPss = KeyType_rsaPssKey,
+    RsaOaep = KeyType_rsaOaepKey,
+    Kyber = KeyType_kyberKey,
+    Ed = KeyType_edKey,
+    EcMont = KeyType_ecMontKey,
+    Mldsa = KeyType_mldsaKey,
+}
+
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 impl_clone!(PublicKey, SECKEY_CopyPublicKey);
 
 impl PublicKey {
-    /// Get the HPKE serialization of the public key.
+    /// Get [the HPKE serialization][0] of the public key.
+    ///
+    /// This is only supported for [P256], [P384], [P521], and [X25519] EC keys.
     ///
     /// # Errors
     ///
-    /// When the key cannot be exported, which can be because the type is not supported.
+    /// * [`Error::InvalidInput`][]: for non-HPKE key types.
     ///
-    /// # Panics
-    ///
-    /// When keys are too large to fit in `c_uint/usize`.  So only on programming error.
+    /// [0]: https://www.rfc-editor.org/rfc/rfc9180.html#section-7.1.1
+    /// [P256]: crate::ec::EcCurve::P256
+    /// [P384]: crate::ec::EcCurve::P384
+    /// [P521]: crate::ec::EcCurve::P521
+    /// [X25519]: crate::ec::EcCurve::X25519
     pub fn key_data(&self) -> Res<Vec<u8>> {
-        let mut buf = vec![0; 100];
-        let mut len: c_uint = 0;
-        secstatus_to_res(unsafe {
-            PK11_HPKE_Serialize(
-                **self,
-                buf.as_mut_ptr(),
-                &raw mut len,
-                c_uint::try_from(buf.len()).map_err(|_| Error::IntegerOverflow)?,
-            )
-        })?;
-        buf.truncate(usize::try_from(len).map_err(|_| Error::IntegerOverflow)?);
-        Ok(buf)
+        let ptr = unsafe { self.ptr.as_ref() }.ok_or(Error::InvalidInput)?;
+
+        if ptr.keyType != KeyType_ecKey && ptr.keyType != KeyType_ecMontKey {
+            return Err(Error::InvalidInput);
+        }
+
+        Ok(unsafe { ptr.u.ec.as_ref().publicValue.as_slice() }.to_owned())
     }
 
+    /// Get the DER-encoded serialization of an EC point.
     pub fn key_data_alt(&self) -> Res<Vec<u8>> {
         let mut key_item = SECItemMut::make_empty();
         secstatus_to_res(unsafe {
@@ -108,6 +128,15 @@ impl PublicKey {
             )
         })?;
         Ok(key_item.as_slice().to_owned())
+    }
+
+    /// Get the public key's [type][KeyType].
+    ///
+    /// Returns `None` for unknown types.
+    #[must_use]
+    pub fn key_type(&self) -> Option<KeyType> {
+        let ptr = unsafe { self.ptr.as_ref()? };
+        KeyType::from_repr(ptr.keyType)
     }
 }
 
@@ -154,6 +183,15 @@ impl PrivateKey {
             SECITEM_FreeItem(key_item.as_mut(), PRBool::from(false));
         }
         Ok(key)
+    }
+
+    /// Get the private key's [type][KeyType].
+    ///
+    /// Returns `None` for unknown types.
+    #[must_use]
+    pub fn key_type(&self) -> Option<KeyType> {
+        let ptr = unsafe { self.ptr.as_ref()? };
+        KeyType::from_repr(ptr.keyType)
     }
 }
 unsafe impl Send for PrivateKey {}
