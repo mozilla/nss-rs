@@ -36,17 +36,17 @@ fn basic() {
     println!("server {:p}", &server);
 
     let bytes = client.handshake(now(), &[]).expect("send CH");
-    assert!(!bytes.is_empty());
+    assert_ne!(bytes, []);
     assert_eq!(*client.state(), HandshakeState::InProgress);
 
     let bytes = server
         .handshake(now(), &bytes[..])
         .expect("read CH, send SH");
-    assert!(!bytes.is_empty());
+    assert_ne!(bytes, []);
     assert_eq!(*server.state(), HandshakeState::InProgress);
 
     let bytes = client.handshake(now(), &bytes[..]).expect("send CF");
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, []);
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
     client.authenticated(AuthenticationStatus::Ok);
@@ -54,7 +54,7 @@ fn basic() {
 
     // Calling handshake() again indicates that we're happy with the cert.
     let bytes = client.handshake(now(), &[]).expect("send CF");
-    assert!(!bytes.is_empty());
+    assert_ne!(bytes, []);
     assert!(client.state().is_connected());
 
     let client_info = client.info().expect("got info");
@@ -66,7 +66,7 @@ fn basic() {
     );
 
     let bytes = server.handshake(now(), &bytes[..]).expect("finish");
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, []);
     assert!(server.state().is_connected());
 
     let server_info = server.info().expect("got info");
@@ -136,8 +136,8 @@ fn raw() {
     // The client should have one certificate for the server.
     let certs = client.peer_certificate().unwrap();
     assert_eq!(1, certs.into_iter().count());
-    assert!(certs.stapled_ocsp_responses().unwrap().is_empty());
-    assert!(certs.signed_cert_timestamp().unwrap().is_empty());
+    assert_eq!(certs.stapled_ocsp_responses().unwrap(), [] as [Vec<u8>; 0]);
+    assert_eq!(certs.signed_cert_timestamp().unwrap(), []);
 
     // The server shouldn't have a client certificate.
     assert!(server.peer_certificate().is_none());
