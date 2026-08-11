@@ -137,7 +137,7 @@ impl ZeroRttChecker for PermissiveZeroRttChecker {
         if self.resuming {
             assert_eq!(ZERO_RTT_TOKEN_DATA, token);
         } else {
-            assert_eq!(token, []);
+            assert!(token.is_empty());
         }
         ZeroRttCheckResult::Accept
     }
