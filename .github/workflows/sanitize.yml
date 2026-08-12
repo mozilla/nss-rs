@@ -46,13 +46,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
 
-      - id: nss-meta
-        uses: ./.github/actions/nss-metadata
-
-      - uses: mozilla/actions/nss@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+      - uses: ./install-nss
         with:
-          minimum-version: ${{ steps.nss-meta.outputs.min-version }}
-          sha256: ${{ steps.nss-meta.outputs.sha256 }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests with sanitizers

@@ -24,7 +24,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if ! output=$(cargo metadata --no-deps --format-version=1 \
+        if ! output=$(cargo metadata --format-version=1 \
           | jq -r '.packages[] | select(.name=="nss-rs") | . as $pkg | $pkg.metadata.nss
               | ("min-version=" + (.["min-version"] // error("min-version missing from Cargo.toml metadata"))),
                 ("sha256=" + (.sha256 // error("sha256 missing from Cargo.toml metadata"))),
