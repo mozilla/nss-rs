@@ -39,6 +39,7 @@ jobs:
       - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
 
       - id: nss-meta
         uses: ./.github/actions/nss-metadata
