@@ -117,6 +117,12 @@ exclude = [
     "renovate.json",
 ]
 
+[package.metadata.nss]
+# Minimum NSS version required for nss-rs.
+min-version = "3.121"
+# SHA256 of the 'nss-<min-version>-with-nspr-<some-version>.tar.gz' release tarball.
+sha256 = "76b9a1364bc4522abc652c4d676498d5062f502f64e38b32e9e2c7a3fff530f1"
+
 [dependencies]
 enum-map = { version = "2.7", default-features = false }
 log = { workspace = true }

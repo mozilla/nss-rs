@@ -29,14 +29,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          version-file: min_version.txt
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: nightly
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-meta
+        uses: ./.github/actions/nss-metadata
+
+      - uses: mozilla/actions/nss@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+        with:
+          minimum-version: ${{ steps.nss-meta.outputs.min-version }}
+          sha256: ${{ steps.nss-meta.outputs.sha256 }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run baseline test
@@ -64,15 +68,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          version-file: neqo-crypto/min_version.txt
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: nightly
           tools: cargo-mutants
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-meta
+        uses: ./.github/actions/nss-metadata
+
+      - uses: mozilla/actions/nss@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+        with:
+          minimum-version: ${{ steps.nss-meta.outputs.min-version }}
+          sha256: ${{ steps.nss-meta.outputs.sha256 }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find mutants

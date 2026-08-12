@@ -1,0 +1,21 @@
+name: "NSS metadata"
+description: "Read the minimum NSS version and release tarball SHA256 from Cargo.toml."
+
+outputs:
+  min-version:
+    description: "Minimum NSS version required by nss-rs."
+    value: ${{ steps.read.outputs.min-version }}
+  sha256:
+    description: "SHA256 of the matching NSS release tarball."
+    value: ${{ steps.read.outputs.sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      run: |
+        cargo metadata --no-deps --format-version=1 \
+          | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss
+              | "min-version=" + .["min-version"], "sha256=" + .sha256' \
+          >> "$GITHUB_OUTPUT"

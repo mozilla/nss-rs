@@ -25,8 +25,6 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
           fetch-tags: true
-          sparse-checkout: min_version.txt
-          sparse-checkout-cone-mode: false
 
       - name: Get latest tag
         id: tag
@@ -38,11 +36,19 @@ jobs:
           fi
           echo "ref=$TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
-          version-file: min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/semver@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - id: nss-meta
+        uses: ./.github/actions/nss-metadata
+
+      - uses: mozilla/actions/nss@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+        with:
+          minimum-version: ${{ steps.nss-meta.outputs.min-version }}
+          sha256: ${{ steps.nss-meta.outputs.sha256 }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mozilla/actions/semver@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           base-ref: ${{ steps.tag.outputs.ref }}

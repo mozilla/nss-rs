@@ -23,12 +23,19 @@ use bindgen::Builder;
 use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
 
-#[path = "src/min_version.rs"]
-mod min_version;
-use min_version::MINIMUM_NSS_VERSION;
-
 const BINDINGS_DIR: &str = "bindings";
 const BINDINGS_CONFIG: &str = "bindings.toml";
+
+// The minimum version of NSS that this version of nss-rs requires.
+fn min_nss_version() -> String {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest = fs::read_to_string(Path::new(&manifest_dir).join("Cargo.toml")).unwrap();
+    let manifest: ::toml::Value = ::toml::from_str(&manifest).unwrap();
+    manifest["package"]["metadata"]["nss"]["min-version"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
 
 // This is the format of a single section of the configuration file.
 #[derive(Deserialize)]
@@ -368,7 +375,7 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         .expect("couldn't write bindings");
 }
 
-fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
+fn pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
     let modversion = Command::new("pkg-config")
         .args(["--modversion", "nss"])
         .output()?
@@ -388,7 +395,7 @@ fn pkg_config() -> Result<Vec<String>, Box<dyn Error>> {
 
     let modversion_for_cmp = Version::parse(&modversion_for_cmp)?;
 
-    let version_req = VersionReq::parse(&format!(">={}", MINIMUM_NSS_VERSION.trim()))?;
+    let version_req = VersionReq::parse(&format!(">={min_version}"))?;
 
     assert!(
         version_req.matches(&modversion_for_cmp),
@@ -593,17 +600,19 @@ fn process_config(config: &mut HashMap<String, Bindings>) {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/min_version.rs");
-    println!("cargo:rerun-if-changed=min_version.txt");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rustc-check-cfg=cfg(nss_nodb)");
     setup_clang();
+
+    let min_version = min_nss_version();
+    println!("cargo:rustc-env=NSS_MIN_VERSION={min_version}");
 
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
     } else {
-        pkg_config().unwrap_or_else(|_| setup_standalone(nss_dir()))
+        pkg_config(&min_version).unwrap_or_else(|_| setup_standalone(nss_dir()))
     };
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
