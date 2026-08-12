@@ -15,7 +15,11 @@ runs:
     - id: read
       shell: bash
       run: |
-        cargo metadata --no-deps --format-version=1 \
+        output=$(cargo metadata --no-deps --format-version=1 \
           | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss
-              | "min-version=" + .["min-version"], "sha256=" + .sha256' \
-          >> "$GITHUB_OUTPUT"
+              | "min-version=" + .["min-version"], "sha256=" + .sha256')
+        if [ -z "$output" ]; then
+          echo "::error::Could not read NSS metadata from Cargo.toml"
+          exit 1
+        fi
+        echo "$output" >> "$GITHUB_OUTPUT"
