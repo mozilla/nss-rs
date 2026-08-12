@@ -294,6 +294,7 @@ fn static_link() {
     }
     if target_arch == "aarch64" {
         static_libs.push("ghash-aes-aarch64_c_lib");
+        static_libs.push("aarch64-gcm-wrap_c_lib");
     }
     if target_arch == "x86_64" || target_arch == "x86" {
         static_libs.push("ghash-aes-x86_c_lib");

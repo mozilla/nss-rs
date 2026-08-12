@@ -119,9 +119,9 @@ exclude = [
 
 [package.metadata.nss]
 # Minimum NSS version required for nss-rs.
-min-version = "3.121"
+min-version = "3.126"
 # SHA256 of the 'nss-<min-version>-with-nspr-<some-version>.tar.gz' release tarball.
-sha256 = "76b9a1364bc4522abc652c4d676498d5062f502f64e38b32e9e2c7a3fff530f1"
+sha256 = "c95a4cf93d6939000642254422d71dffccb5c017d0f40733d3e2be18aa93f1be"
 
 [dependencies]
 enum-map = { version = "2.7", default-features = false }
