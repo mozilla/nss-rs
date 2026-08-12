@@ -15,9 +15,13 @@ runs:
     - id: read
       shell: bash
       run: |
-        output=$(cargo metadata --no-deps --format-version=1 \
+        if ! output=$(cargo metadata --no-deps --format-version=1 \
           | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss
-              | "min-version=" + .["min-version"], "sha256=" + .sha256')
+              | ("min-version=" + (.["min-version"] // error("min-version missing from Cargo.toml metadata"))),
+                ("sha256=" + (.sha256 // error("sha256 missing from Cargo.toml metadata")))'); then
+          echo "::error::Could not read NSS metadata from Cargo.toml"
+          exit 1
+        fi
         if [ -z "$output" ]; then
           echo "::error::Could not read NSS metadata from Cargo.toml"
           exit 1
