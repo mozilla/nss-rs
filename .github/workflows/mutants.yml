@@ -33,6 +33,7 @@ jobs:
         with:
           version: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
 
       - id: nss-meta
         uses: ./.github/actions/nss-metadata
@@ -73,6 +74,7 @@ jobs:
           version: nightly
           tools: cargo-mutants
           token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
 
       - id: nss-meta
         uses: ./.github/actions/nss-metadata

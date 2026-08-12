@@ -26,6 +26,7 @@ runs:
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4, cargo-hack
         token: ${{ inputs.github-token }}
+        rust-cache: false
 
     - id: nss-meta
       uses: ./.github/actions/nss-metadata

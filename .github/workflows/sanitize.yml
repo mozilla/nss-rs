@@ -44,6 +44,7 @@ jobs:
           components: rust-src
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
 
       - id: nss-meta
         uses: ./.github/actions/nss-metadata

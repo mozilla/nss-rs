@@ -83,6 +83,7 @@ jobs:
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }} cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
 
       - id: nss-meta
         uses: ./.github/actions/nss-metadata
@@ -179,6 +180,7 @@ jobs:
           version: stable
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
       - run: |
           cargo update -w --locked
           cargo hack update -w --locked
