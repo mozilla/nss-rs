@@ -52,3 +52,30 @@ jobs:
       - uses: mozilla/actions/semver@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           base-ref: ${{ steps.tag.outputs.ref }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.tag.outputs.ref }}
+          path: baseline
+
+      - id: nss-meta-baseline
+        uses: ./.github/actions/nss-metadata
+        continue-on-error: true # the baseline tag may predate [package.metadata.nss]
+        with:
+          working-directory: baseline
+
+      - name: Ensure crate version is bumped if the NSS floor changed
+        if: steps.nss-meta-baseline.outcome == 'success'
+        env:
+          BASE_MIN: ${{ steps.nss-meta-baseline.outputs.min-version }}
+          HEAD_MIN: ${{ steps.nss-meta.outputs.min-version }}
+          BASE_VERSION: ${{ steps.nss-meta-baseline.outputs.crate-version }}
+          HEAD_VERSION: ${{ steps.nss-meta.outputs.crate-version }}
+        run: |
+          echo "NSS floor: $BASE_MIN -> $HEAD_MIN"
+          echo "Crate version: $BASE_VERSION -> $HEAD_VERSION"
+          if [ "$BASE_MIN" != "$HEAD_MIN" ] && [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+            echo "::error::NSS floor bumped ($BASE_MIN -> $HEAD_MIN) without a crate version bump. Bump [package].version in Cargo.toml."
+            exit 1
+          fi
