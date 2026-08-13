@@ -1,0 +1,15 @@
+name: Release
+on: # zizmor: ignore[concurrency-limits] - release events are inherently serialised
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  release:
+    name: Update major version tag
+    uses: mozilla/actions/.github/workflows/release.yml@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+    permissions:
+      contents: write # Required to update the major version tag
+    with:
+      tag: ${{ github.event.release.tag_name }}
