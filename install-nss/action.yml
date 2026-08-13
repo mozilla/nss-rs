@@ -33,7 +33,7 @@ runs:
       with:
         working-directory: ${{ inputs.working-directory }}
 
-    - uses: mozilla/actions/nss@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+    - uses: mozilla/actions/nss@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
       with:
         minimum-version: ${{ steps.meta.outputs.min-version }}
         sha256: ${{ steps.meta.outputs.sha256 }}
