@@ -29,7 +29,7 @@ runs:
   using: composite
   steps:
     - id: meta
-      uses: mozilla/nss-rs/.github/actions/nss-metadata@0 # zizmor: ignore[unpinned-uses] - self-reference, no supply-chain risk
+      uses: $/.github/actions/nss-metadata
       with:
         working-directory: ${{ inputs.working-directory }}
 
