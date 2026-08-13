@@ -36,7 +36,7 @@ jobs:
           fi
           echo "ref=$TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: mozilla/actions/rust@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
@@ -46,7 +46,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/semver@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+      - uses: mozilla/actions/semver@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           base-ref: ${{ steps.tag.outputs.ref }}
 

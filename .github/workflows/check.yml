@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+        uses: mozilla/actions/toolchains@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
 
   check:
     name: Run checks
@@ -77,7 +77,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: stable
           tools: cargo-hack

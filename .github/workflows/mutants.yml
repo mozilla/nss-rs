@@ -29,7 +29,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -64,7 +64,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@cd1f0dcf30d92e633a0a89c10a330542deed6f24 # v2.0.1
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: nightly
           tools: cargo-mutants
