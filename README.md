@@ -8,7 +8,7 @@ This is work in progress and major changes are expected. API stability is NOT a 
 
 ### `install-nss` — Install NSS for downstream consumers
 
-For projects that depend on this crate, installs the NSS release it requires (version and checksum read from your own `Cargo.lock`) via [`mozilla/actions/nss`](https://github.com/mozilla/actions).
+For projects that depend on this crate, installs the NSS release it requires.
 
 ```yaml
 - uses: mozilla/nss-rs/install-nss@<ref>
@@ -17,4 +17,3 @@ For projects that depend on this crate, installs the NSS release it requires (ve
     target: "" # optional; target for cross-compilation
     token: ${{ secrets.GITHUB_TOKEN }} # optional; avoids rate limits
 ```
-

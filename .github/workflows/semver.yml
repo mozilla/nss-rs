@@ -41,10 +41,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
 
-      - id: nss-meta
-        uses: ./.github/actions/nss-metadata
-
-      - uses: ./install-nss
+      - id: install-nss
+        uses: ./install-nss
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -68,9 +66,9 @@ jobs:
         if: steps.nss-meta-baseline.outcome == 'success'
         env:
           BASE_MIN: ${{ steps.nss-meta-baseline.outputs.min-version }}
-          HEAD_MIN: ${{ steps.nss-meta.outputs.min-version }}
+          HEAD_MIN: ${{ steps.install-nss.outputs.min-version }}
           BASE_VERSION: ${{ steps.nss-meta-baseline.outputs.crate-version }}
-          HEAD_VERSION: ${{ steps.nss-meta.outputs.crate-version }}
+          HEAD_VERSION: ${{ steps.install-nss.outputs.crate-version }}
         run: |
           echo "NSS floor: $BASE_MIN -> $HEAD_MIN"
           echo "Crate version: $BASE_VERSION -> $HEAD_VERSION"
