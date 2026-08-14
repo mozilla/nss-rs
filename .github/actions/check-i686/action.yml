@@ -1,0 +1,44 @@
+name: "i686 checks"
+description: "Cross-compile nss-rs and its tests for 32-bit x86 Linux (i686-unknown-linux-gnu)."
+
+inputs:
+  working-directory:
+    description: "Working directory."
+    default: "."
+  github-token:
+    description: "A GitHub PAT"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install 32-bit host toolchain
+      shell: bash
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        if [ -z "$APT_UPDATED" ]; then
+          sudo apt-get update
+          echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+        fi
+        sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib
+
+    - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      with:
+        version: stable
+        targets: i686-unknown-linux-gnu
+        tools: cargo-hack
+        token: ${{ inputs.github-token }}
+        rust-cache: false
+
+    - uses: $/install-nss
+      with:
+        working-directory: ${{ inputs.working-directory }}
+        target: i686-unknown-linux-gnu
+        token: ${{ inputs.github-token }}
+
+    - name: Compile tests (no-run)
+      shell: bash
+      env:
+        WD: ${{ inputs.working-directory }}
+      run: cd "$WD" && cargo hack --feature-powerset --exclude-features gecko,blapi test --no-run --target i686-unknown-linux-gnu

@@ -195,6 +195,17 @@ jobs:
           target: ${{ matrix.target }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  check-i686:
+    name: Check i686-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/check-i686
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   check-distro:
     name: Check with system NSS on ${{ matrix.name }}
     runs-on: ubuntu-24.04
