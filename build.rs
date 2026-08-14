@@ -20,7 +20,6 @@ use std::{
 };
 
 use bindgen::Builder;
-use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
 
 const BINDINGS_DIR: &str = "bindings";
@@ -226,15 +225,13 @@ fn lib_stem(name: &str) -> &str {
     name.split_once('.').map_or(name, |(stem, _)| stem)
 }
 
-/// Emit the link search path for `dir`, and re-run the build script when any of `libs`
-/// found there changes or goes away.
+/// Re-run the build script when any of `libs` found in `dir` changes or goes away.
 ///
 /// Naming the library files rather than `dir` keeps Cargo from scanning a shared system
 /// library directory recursively on every freshness check.  Only files that are present are
 /// named, because a path that is already absent makes Cargo treat the script as dirty on
 /// every later build.
-fn link_search<S: AsRef<str>>(dir: &Path, libs: &[S]) {
-    println!("cargo:rustc-link-search=native={}", dir.display());
+fn rerun_if_libs_changed<S: AsRef<str>>(dir: &Path, libs: &[S]) {
     let wanted: HashSet<&str> = libs.iter().map(|l| lib_stem(l.as_ref())).collect();
     let Ok(entries) = fs::read_dir(dir) else {
         println!(
@@ -252,6 +249,12 @@ fn link_search<S: AsRef<str>>(dir: &Path, libs: &[S]) {
             println!("cargo:rerun-if-changed={path}");
         }
     }
+}
+
+/// Emit the link search path for `dir`, and watch the `libs` found there.
+fn link_search<S: AsRef<str>>(dir: &Path, libs: &[S]) {
+    println!("cargo:rustc-link-search=native={}", dir.display());
+    rerun_if_libs_changed(dir, libs);
 }
 
 fn dynamic_link() -> Vec<&'static str> {
@@ -417,79 +420,59 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         .expect("couldn't write bindings");
 }
 
-fn pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
-    let modversion = Command::new("pkg-config")
-        .args(["--modversion", "nss"])
-        .output()?
-        .stdout;
-
-    let modversion = String::from_utf8(modversion)?;
-
-    let modversion = modversion.trim();
-
-    // The NSS version number does not follow semver numbering, because it omits the patch version
-    // when that's 0. Deal with that.
-    let modversion_for_cmp = if modversion.chars().filter(|c| *c == '.').count() == 1 {
-        modversion.to_owned() + ".0"
-    } else {
-        modversion.to_owned()
+fn setup_pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    // `print_system_libs` is on by default, so a -L is reported even for default library
+    // paths like /usr/lib64 on RHEL/Fedora.  Its cflags counterpart is on by default too,
+    // but turned off here, because -I/usr/include would shadow clang's own headers.
+    // `env_metadata` covers the target-suffixed PKG_CONFIG_* variables.
+    let library = match pkg_config::Config::new()
+        .atleast_version(min_version)
+        .print_system_cflags(false)
+        .env_metadata(true)
+        .probe("nss")
+    {
+        Ok(library) => library,
+        Err(e) => {
+            // Absent and too old fail alike; only the former should build NSS from source.
+            if let Ok(found) = pkg_config::Config::new()
+                .cargo_metadata(false)
+                .env_metadata(false)
+                .probe("nss")
+            {
+                panic!(
+                    "nss-rs has NSS version requirement >={min_version}, found {}",
+                    found.version
+                );
+            }
+            let detail = e
+                .to_string()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!("cargo:warning=pkg-config found no usable NSS: {detail}");
+            return Err(e.into());
+        }
     };
 
-    let modversion_for_cmp = Version::parse(&modversion_for_cmp)?;
-
-    let version_req = VersionReq::parse(&format!(">={min_version}"))?;
-
-    assert!(
-        version_req.matches(&modversion_for_cmp),
-        "nss-rs has NSS version requirement {version_req}, found {modversion}",
-    );
-
-    let cfg = Command::new("pkg-config")
-        .args(["--cflags", "--libs", "nss"])
-        .output()?
-        .stdout;
-
-    let cfg_str = String::from_utf8(cfg)?;
-
-    let mut flags: Vec<String> = Vec::new();
-    let mut lib_dirs: Vec<PathBuf> = Vec::new();
-    let mut libs: Vec<&str> = Vec::new();
-
-    for f in cfg_str.split_whitespace() {
-        if f.starts_with("-I") {
-            flags.push(String::from(f));
-        } else if let Some(path) = f.strip_prefix("-L") {
-            lib_dirs.push(PathBuf::from(path));
-        } else if let Some(lib) = f.strip_prefix("-l") {
-            println!("cargo:rustc-link-lib=dylib={lib}");
-            libs.push(lib);
-        } else {
-            println!("cargo:warning=Unknown flag from pkg-config: {f}");
-        }
+    let mut libs = library.libs.clone();
+    libs.extend(maybe_link_freebl3().map(String::from));
+    for dir in &library.link_paths {
+        rerun_if_libs_changed(dir, &libs);
     }
 
-    if env::var("CARGO_FEATURE_BLAPI").is_ok() {
-        // pkg-config omits -L for default system library paths (e.g., /usr/lib64 on
-        // RHEL/Fedora), so also include the libdir from the .pc file.
-        if let Ok(output) = Command::new("pkg-config")
-            .args(["--variable=libdir", "nss"])
-            .output()
-            && output.status.success()
-            && let Ok(s) = String::from_utf8(output.stdout)
-        {
-            let trimmed = s.trim();
-            if !trimmed.is_empty() {
-                let dir = PathBuf::from(trimmed);
-                if !lib_dirs.contains(&dir) {
-                    lib_dirs.push(dir);
-                }
-            }
-        }
-    }
-    libs.extend(maybe_link_freebl3());
-
-    for dir in &lib_dirs {
-        link_search(dir, &libs);
+    let mut flags = library
+        .include_paths
+        .iter()
+        .map(|i| format!("-I{}", i.display()))
+        .collect::<Vec<_>>();
+    let mut defines = library.defines.iter().collect::<Vec<_>>();
+    defines.sort();
+    for (name, value) in defines {
+        flags.push(
+            value
+                .as_ref()
+                .map_or_else(|| format!("-D{name}"), |value| format!("-D{name}={value}")),
+        );
     }
 
     Ok(flags)
@@ -637,16 +620,13 @@ fn main() {
     let min_version = min_nss_version();
     println!("cargo:rustc-env=NSS_MIN_VERSION={min_version}");
 
-    // These select which NSS installation is used, or which flags pkg-config reports.
     for var in [
         "NSS_DIR",
         "NSS_PREBUILT",
         "PKG_CONFIG_PATH",
         "PKG_CONFIG_LIBDIR",
         "PKG_CONFIG_SYSROOT_DIR",
-        "PKG_CONFIG_SYSTEM_LIBRARY_PATH",
         "PKG_CONFIG_SYSTEM_INCLUDE_PATH",
-        "PKG_CONFIG_ALLOW_SYSTEM_LIBS",
         "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS",
     ] {
         println!("cargo:rerun-if-env-changed={var}");
@@ -657,7 +637,7 @@ fn main() {
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
     } else {
-        pkg_config(&min_version).unwrap_or_else(|_| setup_standalone(nss_dir()))
+        setup_pkg_config(&min_version).unwrap_or_else(|_| setup_standalone(nss_dir()))
     };
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
