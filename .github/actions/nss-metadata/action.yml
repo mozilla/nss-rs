@@ -1,0 +1,47 @@
+name: "NSS metadata"
+description: "Read the minimum NSS version, release tarball SHA256, and crate version from Cargo.toml."
+
+inputs:
+  working-directory:
+    description: "Directory containing the Cargo.toml to read."
+    default: "."
+
+outputs:
+  min-version:
+    description: "Minimum NSS version required by nss-rs."
+    value: ${{ steps.read.outputs.min-version }}
+  sha256:
+    description: "SHA256 of the matching NSS release tarball."
+    value: ${{ steps.read.outputs.sha256 }}
+  crate-version:
+    description: "Version of the nss-rs crate."
+    value: ${{ steps.read.outputs.crate-version }}
+
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if ! output=$(cargo metadata --format-version=1 \
+          | jq -r '[.packages[] | select(.name=="nss-rs")] as $matches
+              | if ($matches | length) == 0 then
+                  error("nss-rs not found in the dependency graph")
+                elif ($matches | length) > 1 then
+                  error("multiple nss-rs versions resolved (" + ($matches | map(.version) | join(", ")) + "); cannot determine which NSS metadata to use")
+                else
+                  $matches[0] as $pkg
+                  | $pkg.metadata.nss
+                  | ("min-version=" + (.["min-version"] // error("min-version missing from Cargo.toml metadata"))),
+                    ("sha256=" + (.sha256 // error("sha256 missing from Cargo.toml metadata"))),
+                    ("crate-version=" + ($pkg.version // error("version missing from Cargo.toml")))
+                end'); then
+          echo "::error::Could not read NSS metadata from Cargo.toml"
+          exit 1
+        fi
+        if [ -z "$output" ]; then
+          echo "::error::Could not read NSS metadata from Cargo.toml"
+          exit 1
+        fi
+        echo "$output" >> "$GITHUB_OUTPUT"

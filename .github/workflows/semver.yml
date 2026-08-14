@@ -20,13 +20,11 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 1
           fetch-tags: true
-          sparse-checkout: min_version.txt
-          sparse-checkout-cone-mode: false
 
       - name: Get latest tag
         id: tag
@@ -38,11 +36,43 @@ jobs:
           fi
           echo "ref=$TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
-          version-file: min_version.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
+
+      - id: install-nss
+        uses: ./install-nss
+        with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/semver@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/semver@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           base-ref: ${{ steps.tag.outputs.ref }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.tag.outputs.ref }}
+          path: baseline
+
+      - id: nss-meta-baseline
+        uses: ./.github/actions/nss-metadata
+        continue-on-error: true # the baseline tag may predate [package.metadata.nss]
+        with:
+          working-directory: baseline
+
+      - name: Ensure crate version is bumped if the NSS floor changed
+        if: steps.nss-meta-baseline.outcome == 'success'
+        env:
+          BASE_MIN: ${{ steps.nss-meta-baseline.outputs.min-version }}
+          HEAD_MIN: ${{ steps.install-nss.outputs.min-version }}
+          BASE_VERSION: ${{ steps.nss-meta-baseline.outputs.crate-version }}
+          HEAD_VERSION: ${{ steps.install-nss.outputs.crate-version }}
+        run: |
+          echo "NSS floor: $BASE_MIN -> $HEAD_MIN"
+          echo "Crate version: $BASE_VERSION -> $HEAD_VERSION"
+          if [ "$BASE_MIN" != "$HEAD_MIN" ] && [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+            echo "::error::NSS floor bumped ($BASE_MIN -> $HEAD_MIN) without a crate version bump. Bump [package].version in Cargo.toml."
+            exit 1
+          fi

@@ -13,9 +13,6 @@ inputs:
     # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
     # However, NSS requires an API >= 23 for a few symbols.
     default: "23"
-  minimum-nss-version:
-    description: "If NSS is required, the minimum version required."
-    default: ""
   github-token:
     description: "A Github PAT"
     required: true
@@ -23,17 +20,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+    - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4, cargo-hack
         token: ${{ inputs.github-token }}
+        rust-cache: false
 
-    - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-      if: ${{ inputs.minimum-nss-version != '' }}
+    - uses: ./install-nss
       with:
-        minimum-version: ${{ inputs.minimum-nss-version }}
         target: ${{ inputs.target }}
         token: ${{ inputs.github-token }}
 
@@ -76,7 +72,7 @@ runs:
         EOF
         chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
 
-    - uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+    - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
       if: ${{ !startsWith(inputs.target, 'aarch64') }}
       with:
         api-level: ${{ inputs.api-level }}

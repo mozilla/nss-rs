@@ -35,6 +35,7 @@ nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 allow_attributes = "warn"
 allow_attributes_without_reason = "allow"
+assert_is_empty = "allow" # We prefer using is_empty() in asserts.
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
 create_dir = "warn"
@@ -99,7 +100,7 @@ verbose_file_reads = "warn"
 
 [package]
 name = "nss-rs"
-version = "0.13.4"
+version = "0.14.5"
 authors = ["Martin Thomson <mt@lowentropy.net>", "Andy Leiserson <aleiserson@mozilla.com>", "John M. Schanck <jschanck@mozilla.com>", "Benjamin Beurdouche <beurdouche@mozilla.com>", "Anna Weine <anna.weine@mozilla.com>"]
 categories = ["network-programming", "web-programming"]
 keywords = ["nss", "crypto", "mozilla", "firefox"]
@@ -115,6 +116,12 @@ exclude = [
     "Cargo.lock",
     "renovate.json",
 ]
+
+[package.metadata.nss]
+# Minimum NSS version required for nss-rs.
+min-version = "3.126"
+# SHA256 of the 'nss-<min-version>-with-nspr-<some-version>.tar.gz' release tarball.
+sha256 = "c95a4cf93d6939000642254422d71dffccb5c017d0f40733d3e2be18aa93f1be"
 
 [dependencies]
 enum-map = { version = "2.7", default-features = false }
