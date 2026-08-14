@@ -28,7 +28,7 @@ min-version = "3.126"
 sha256 = "c95a4cf93d6939000642254422d71dffccb5c017d0f40733d3e2be18aa93f1be"
 
 [package.metadata.cargo-machete]
-ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
+ignored = ["bindgen", "pkg-config", "serde", "serde_derive", "toml"]
 
 [workspace]
 members = ["test-fixture"]
@@ -159,7 +159,7 @@ test-fixture = { path = "test-fixture" }
 [build-dependencies]
 bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
 mozbuild = { version = "0.1", default-features = false, optional = true }
-semver = { version = "1", default-features = false, features = ["std"] }
+pkg-config = { version = "0.3.16", default-features = false }
 serde = { version = "1", default-features = false, features = ["std"] }
 serde_derive = { version = "1", default-features = false }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
