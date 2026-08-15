@@ -12,9 +12,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    env,
-    error::Error,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -373,6 +371,13 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     vec![nsprinclude, nssinclude]
 }
 
+fn include_flags(includes: &[PathBuf]) -> Vec<String> {
+    includes
+        .iter()
+        .map(|i| format!("-I{}", i.to_str().unwrap()))
+        .collect()
+}
+
 /// Type PKCS#11 `#define`s as the `CK_*` typedefs they belong to. Bindgen otherwise picks the
 /// smallest integer that fits the value, which needs a conversion at every use.
 #[derive(Debug)]
@@ -461,7 +466,7 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         .expect("couldn't write bindings");
 }
 
-fn setup_pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
+fn setup_pkg_config(min_version: &str) -> Option<Vec<String>> {
     // `print_system_libs` is on by default, so a -L is reported even for default library
     // paths like /usr/lib64 on RHEL/Fedora.  Its cflags counterpart is on by default too,
     // but turned off here, because -I/usr/include would shadow clang's own headers.
@@ -470,6 +475,7 @@ fn setup_pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
         .atleast_version(min_version)
         .print_system_cflags(false)
         .env_metadata(true)
+        .statik(false)
         .probe("nss")
     {
         Ok(library) => library,
@@ -481,7 +487,8 @@ fn setup_pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
                 .probe("nss")
             {
                 panic!(
-                    "nss-rs has NSS version requirement >={min_version}, found {}",
+                    "nss-rs has NSS version requirement >={min_version}, found {}; \
+                     set NSS_DIR to a newer checkout, or NSS_NO_PKG_CONFIG=1 to build NSS from source",
                     found.version
                 );
             }
@@ -491,32 +498,30 @@ fn setup_pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
                 .collect::<Vec<_>>()
                 .join(" ");
             println!("cargo:warning=pkg-config found no usable NSS: {detail}");
-            return Err(e.into());
+            return None;
         }
     };
 
-    let mut libs = library.libs.clone();
-    libs.extend(maybe_link_freebl3().map(String::from));
+    let libs = library
+        .libs
+        .iter()
+        .map(String::as_str)
+        .chain(maybe_link_freebl3())
+        .collect::<Vec<_>>();
     for dir in &library.link_paths {
         rerun_if_libs_changed(dir, &libs);
     }
 
-    let mut flags = library
-        .include_paths
-        .iter()
-        .map(|i| format!("-I{}", i.display()))
-        .collect::<Vec<_>>();
+    let mut flags = include_flags(&library.include_paths);
     let mut defines = library.defines.iter().collect::<Vec<_>>();
     defines.sort();
-    for (name, value) in defines {
-        flags.push(
-            value
-                .as_ref()
-                .map_or_else(|| format!("-D{name}"), |value| format!("-D{name}={value}")),
-        );
-    }
+    flags.extend(defines.into_iter().map(|(name, value)| {
+        value
+            .as_ref()
+            .map_or_else(|| format!("-D{name}"), |value| format!("-D{name}={value}"))
+    }));
 
-    Ok(flags)
+    Some(flags)
 }
 
 fn setup_standalone(nss_dir: String) -> Vec<String> {
@@ -547,12 +552,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
     };
     link_search(&nsslibdir, &libs);
 
-    let mut flags: Vec<String> = Vec::new();
-    for i in includes {
-        flags.push(String::from("-I") + i.to_str().unwrap());
-    }
-
-    flags
+    include_flags(&includes)
 }
 
 #[cfg(feature = "gecko")]
@@ -678,7 +678,7 @@ fn main() {
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
     } else {
-        setup_pkg_config(&min_version).unwrap_or_else(|_| setup_standalone(nss_dir()))
+        setup_pkg_config(&min_version).unwrap_or_else(|| setup_standalone(nss_dir()))
     };
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
