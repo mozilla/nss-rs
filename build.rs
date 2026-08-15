@@ -360,6 +360,13 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     vec![nsprinclude, nssinclude]
 }
 
+fn include_flags(includes: &[PathBuf]) -> Vec<String> {
+    includes
+        .iter()
+        .map(|i| format!("-I{}", i.display()))
+        .collect()
+}
+
 fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
     let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
@@ -460,11 +467,7 @@ fn setup_pkg_config(min_version: &str) -> Result<Vec<String>, Box<dyn Error>> {
         rerun_if_libs_changed(dir, &libs);
     }
 
-    let mut flags = library
-        .include_paths
-        .iter()
-        .map(|i| format!("-I{}", i.display()))
-        .collect::<Vec<_>>();
+    let mut flags = include_flags(&library.include_paths);
     let mut defines = library.defines.iter().collect::<Vec<_>>();
     defines.sort();
     for (name, value) in defines {
@@ -506,12 +509,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
     };
     link_search(&nsslibdir, &libs);
 
-    let mut flags: Vec<String> = Vec::new();
-    for i in includes {
-        flags.push(String::from("-I") + i.to_str().unwrap());
-    }
-
-    flags
+    include_flags(&includes)
 }
 
 #[cfg(feature = "gecko")]
