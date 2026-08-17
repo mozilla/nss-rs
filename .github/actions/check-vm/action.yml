@@ -107,7 +107,7 @@ runs:
           cargo install cargo-hack@0.6.45 --locked
           case "$PLATFORM" in
             # renovate: depName=cargo-llvm-cov datasource=crate
-            freebsd)    cargo install cargo-llvm-cov@0.8.7 --locked
+            freebsd)    cargo install cargo-llvm-cov@0.9.0 --locked
                         cargo llvm-cov test --locked --no-fail-fast --codecov --output-path codecov.json
                         ;;
             *)          # FIXME: No profiler support on other platforms, error is: cannot find crate for profiler_builtins
