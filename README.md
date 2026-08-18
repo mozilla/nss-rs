@@ -4,6 +4,12 @@ nss-rs is intended to provide a safe and idiomatic Rust interface to NSS.  It is
 
 This is work in progress and major changes are expected. API stability is NOT a goal, nor is compatibility with any particular Rust version. This crate exists to serve the needs of the limited set of crates that depend on it.
 
+## Building
+
+NSS is located with `pkg-config` by default. Set `NSS_DIR` to an NSS checkout to build it from source instead, and `NSS_PREBUILT` if that checkout is already built.
+
+When cross-compiling, `pkg-config` is only consulted if `PKG_CONFIG_ALLOW_CROSS=1` or a target-suffixed `PKG_CONFIG_PATH` is set. Otherwise NSS is built from source.
+
 ## GitHub Actions
 
 ### `install-nss` — Install NSS for downstream consumers
