@@ -24,7 +24,7 @@ use pkcs11_bindings::{CKA_EC_POINT, CKA_VALUE};
 use crate::{
     err::{Error, Res, secstatus_to_res},
     nss_prelude::SECITEM_FreeItem,
-    util::SECItemMut,
+    util::{SECItemBorrowed, SECItemMut},
 };
 
 #[must_use]
@@ -62,6 +62,20 @@ use crate::null_safe_slice;
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
 scoped_ptr!(CertList, CERTCertList, CERT_DestroyCertList);
+
+impl Certificate {
+    /// Extract the SubjectPublicKeyInfo from this certificate as a usable
+    /// `PublicKey` handle. The returned handle is independent of the
+    /// certificate and survives the certificate being dropped.
+    pub fn public_key(&self) -> Res<PublicKey> {
+        let ptr = unsafe { CERT_ExtractPublicKey(**self) };
+        if ptr.is_null() {
+            Err(Error::Internal)
+        } else {
+            PublicKey::from_ptr(ptr)
+        }
+    }
+}
 
 scoped_ptr!(
     SubjectPublicKeyInfo,
@@ -222,6 +236,31 @@ impl Slot {
         }
     }
 
+    /// Find a certificate on this slot by nickname.
+    #[must_use]
+    pub fn find_cert_by_nickname(&self, nickname: &str) -> Option<Certificate> {
+        let c_nickname = std::ffi::CString::new(nickname).ok()?;
+        let ptr = unsafe {
+            PK11_FindCertFromNickname(c_nickname.as_ptr().cast_mut(), null_mut())
+        };
+        if ptr.is_null() {
+            None
+        } else {
+            Certificate::from_ptr(ptr).ok()
+        }
+    }
+
+    /// Find the private key associated with a certificate on this slot.
+    #[must_use]
+    pub fn find_private_key_for_cert(&self, cert: &Certificate) -> Option<PrivateKey> {
+        let ptr = unsafe { PK11_FindPrivateKeyFromCert(self.ptr, **cert, null_mut()) };
+        if ptr.is_null() {
+            None
+        } else {
+            PrivateKey::from_ptr(ptr).ok()
+        }
+    }
+
     /// Generate a persistent symmetric key on this slot with a nickname.
     pub fn generate_token_key(
         &self,
@@ -245,6 +284,91 @@ impl Slot {
         secstatus_to_res(unsafe { PK11_SetSymKeyNickname(*key, c_nickname.as_ptr()) })?;
         Ok(key)
     }
+}
+
+/// RSA-OAEP-SHA256 encryption with an MGF1-SHA256 mask and an empty label.
+///
+/// The plaintext length must fit within the RSA modulus minus the OAEP
+/// overhead (`modulus_size - 2 * hash_size - 2`, i.e. 190 bytes for an
+/// RSA-2048 key with SHA-256). The ciphertext is always `modulus_size`
+/// bytes long.
+///
+/// # Errors
+///
+/// Returns an NSS error if the public key is not an RSA key, the
+/// plaintext is too long, or the underlying token rejects the request.
+pub fn rsa_oaep_sha256_encrypt(pubkey: &PublicKey, plaintext: &[u8]) -> Res<Vec<u8>> {
+    let params = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA256.into(),
+        mgf: CKG_MGF1_SHA256.into(),
+        source: CKZ_DATA_SPECIFIED.into(),
+        pSourceData: null_mut(),
+        ulSourceDataLen: 0,
+    };
+    let mut param = SECItemBorrowed::wrap_struct(&params)?;
+    // Upper bound: RSA-8192 ciphertext is 1024 bytes. We never expect more
+    // than RSA-4096 in practice but size the buffer generously.
+    const MAX_RSA_CIPHERTEXT: usize = 1024;
+    let mut out = vec![0u8; MAX_RSA_CIPHERTEXT];
+    let mut out_len: c_uint = 0;
+    let pt_len = c_uint::try_from(plaintext.len()).map_err(|_| Error::IntegerOverflow)?;
+    secstatus_to_res(unsafe {
+        PK11_PubEncrypt(
+            **pubkey,
+            CKM_RSA_PKCS_OAEP.into(),
+            param.as_mut(),
+            out.as_mut_ptr(),
+            &raw mut out_len,
+            c_uint::try_from(MAX_RSA_CIPHERTEXT).map_err(|_| Error::IntegerOverflow)?,
+            plaintext.as_ptr(),
+            pt_len,
+            null_mut(),
+        )
+    })?;
+    out.truncate(usize::try_from(out_len).map_err(|_| Error::IntegerOverflow)?);
+    Ok(out)
+}
+
+/// RSA-OAEP-SHA256 decryption symmetric to `rsa_oaep_sha256_encrypt`.
+///
+/// Returns the recovered plaintext; on a token-resident private key the
+/// underlying `PK11_PrivDecrypt` performs the operation on the token, so
+/// the private key material never leaves the device.
+///
+/// # Errors
+///
+/// Returns an NSS error if the private key is not RSA, the ciphertext
+/// length doesn't match the key's modulus, OAEP padding verification
+/// fails, or the token rejects the request (e.g. not authenticated).
+pub fn rsa_oaep_sha256_decrypt(privkey: &PrivateKey, ciphertext: &[u8]) -> Res<Vec<u8>> {
+    let params = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA256.into(),
+        mgf: CKG_MGF1_SHA256.into(),
+        source: CKZ_DATA_SPECIFIED.into(),
+        pSourceData: null_mut(),
+        ulSourceDataLen: 0,
+    };
+    let mut param = SECItemBorrowed::wrap_struct(&params)?;
+    // Recovered plaintext is at most `modulus_size - 2 * hash_size - 2`,
+    // bounded above by `ciphertext.len()`. Use that as the cap.
+    let max_len = ciphertext.len();
+    let mut out = vec![0u8; max_len];
+    let mut out_len: c_uint = 0;
+    let ct_len = c_uint::try_from(ciphertext.len()).map_err(|_| Error::IntegerOverflow)?;
+    secstatus_to_res(unsafe {
+        PK11_PrivDecrypt(
+            **privkey,
+            CKM_RSA_PKCS_OAEP.into(),
+            param.as_mut(),
+            out.as_mut_ptr(),
+            &raw mut out_len,
+            c_uint::try_from(max_len).map_err(|_| Error::IntegerOverflow)?,
+            ciphertext.as_ptr(),
+            ct_len,
+        )
+    })?;
+    out.truncate(usize::try_from(out_len).map_err(|_| Error::IntegerOverflow)?);
+    Ok(out)
 }
 
 /// Returns all available token slots for the given mechanism.
