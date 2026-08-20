@@ -5,18 +5,17 @@
 // except according to those terms.
 
 use std::{
-    convert::TryFrom,
     ops::Deref,
     os::raw::c_uint,
     ptr::{addr_of_mut, null, null_mut},
 };
 
 use super::{
-    err::{Error, sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res},
+    err::{sec::SEC_ERROR_INVALID_ARGS, secstatus_to_res, Error},
     p11::{PrivateKey, PublicKey, Slot},
 };
 use crate::{
-    PRBool, SECItem, aead::AeadAlgorithms, err::Res, hkdf::HkdfAlgorithm, p11, p11::SymKey,
+    aead::AeadAlgorithms, err::Res, hkdf::HkdfAlgorithm, p11, p11::SymKey, PRBool, SECItem,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -306,7 +305,7 @@ pub fn generate_key_pair(kem: KemAlgorithm) -> Result<(PrivateKey, PublicKey), c
 
 #[cfg(test)]
 mod test {
-    use super::{Config, HpkeR, HpkeS, generate_key_pair};
+    use super::{generate_key_pair, Config, HpkeR, HpkeS};
     use crate::{hpke::Aead, init};
 
     const INFO: &[u8] = b"info";

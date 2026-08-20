@@ -7,7 +7,6 @@
 #![allow(non_camel_case_types, reason = "C enum naming")]
 
 use std::{
-    convert::TryFrom as _,
     marker::PhantomData,
     os::raw::{c_char, c_int, c_uint},
     ptr::null_mut,
