@@ -160,7 +160,7 @@ fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
                 empty.as_ptr(),
                 empty.as_ptr(),
                 nss::SECMOD_DB.as_ptr().cast(),
-                nss::NSS_INIT_READONLY,
+                0,
             )
         })?;
 
