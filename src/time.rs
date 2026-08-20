@@ -63,7 +63,7 @@ impl TimeZero {
                 prtime: prnow,
             }
         } else {
-            let elapsed = Interval::from(now.duration_since(now));
+            let elapsed = Interval::from(now.duration_since(t));
             // An error from these unwrap functions would require
             // ridiculously long application running time.
             let prelapsed: PRTime = elapsed.try_into().unwrap();
@@ -276,6 +276,29 @@ mod test {
     fn timezero_baseline_past() {
         let past = Instant::now().checked_sub(Duration::from_secs(5)).unwrap();
         assert_eq!(TimeZero::baseline(past).instant, past);
+    }
+
+    #[test]
+    #[expect(clippy::disallowed_methods, reason = "Test for special time handling")]
+    fn timezero_baseline_past_prtime() {
+        // A past seed instant must be paired with a `prtime` back-dated by the
+        // same amount, so `instant` and `prtime` name the same moment. Seed two
+        // baselines back-to-back with instants that differ by a known gap: the
+        // gap between their `prtime`s must match. If `elapsed` ignores the seed,
+        // both `prtime`s collapse to "now" and the gap vanishes.
+        const NEAR: Duration = Duration::from_secs(2);
+        const FAR: Duration = Duration::from_secs(8);
+        let now = Instant::now();
+        let tz_near = TimeZero::baseline(now.checked_sub(NEAR).unwrap());
+        let tz_far = TimeZero::baseline(now.checked_sub(FAR).unwrap());
+
+        // Older seed => earlier prtime, so near - far ~= FAR - NEAR = 6s.
+        let gap = tz_near.prtime - tz_far.prtime;
+        let expected = PRTime::try_from((FAR - NEAR).as_micros()).unwrap();
+        assert!(
+            (expected - 1_000_000..expected + 1_000_000).contains(&gap),
+            "prtime not back-dated per seed: gap={gap}us, expected ~{expected}us"
+        );
     }
 
     #[test]
