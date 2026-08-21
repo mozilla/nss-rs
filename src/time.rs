@@ -288,6 +288,8 @@ mod test {
         // both `prtime`s collapse to "now" and the gap vanishes.
         const NEAR: Duration = Duration::from_secs(2);
         const FAR: Duration = Duration::from_secs(8);
+        // The only jitter is the few clock reads between the two calls.
+        const TOLERANCE: Duration = Duration::from_millis(100);
         let now = Instant::now();
         let tz_near = TimeZero::baseline(now.checked_sub(NEAR).unwrap());
         let tz_far = TimeZero::baseline(now.checked_sub(FAR).unwrap());
@@ -295,8 +297,9 @@ mod test {
         // Older seed => earlier prtime, so near - far ~= FAR - NEAR = 6s.
         let gap = tz_near.prtime - tz_far.prtime;
         let expected = PRTime::try_from((FAR - NEAR).as_micros()).unwrap();
+        let tolerance = PRTime::try_from(TOLERANCE.as_micros()).unwrap();
         assert!(
-            (expected - 1_000_000..expected + 1_000_000).contains(&gap),
+            (expected - tolerance..expected + tolerance).contains(&gap),
             "prtime not back-dated per seed: gap={gap}us, expected ~{expected}us"
         );
     }
