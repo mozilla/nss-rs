@@ -296,7 +296,7 @@ mod test {
 
         // Older seed => earlier prtime, so near - far ~= FAR - NEAR = 6s.
         let gap = tz_near.prtime - tz_far.prtime;
-        let expected = PRTime::try_from((FAR - NEAR).as_micros()).unwrap();
+        let expected = PRTime::try_from(FAR.checked_sub(NEAR).unwrap().as_micros()).unwrap();
         let tolerance = PRTime::try_from(TOLERANCE.as_micros()).unwrap();
         assert!(
             (expected - tolerance..expected + tolerance).contains(&gap),
