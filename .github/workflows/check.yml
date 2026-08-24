@@ -215,11 +215,11 @@ jobs:
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
-            container: opensuse/tumbleweed:latest@sha256:052443c5ce4ad7fb7a555164947955202d5697da2519c8f217f0065c45f46736
+            container: opensuse/tumbleweed:latest@sha256:c676589887bd2b33dd82a54c88b1721abf144adabdb2124b03ba606998310969
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
-            container: archlinux:latest@sha256:345a872f6c95e082d4b8c050af637eebb57402c6e2177b411c3acf7df84eb33b
+            container: archlinux:latest@sha256:4bf33b21a715aac0b48ce6e9eaed4782a898eae96f88f5da3635572129c2584a
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
           - name: Alpine
             # renovate: depName=alpine datasource=docker
@@ -230,7 +230,7 @@ jobs:
             rustflags: "-C target-feature=-crt-static"
           - name: Gentoo
             # renovate: depName=gentoo/stage3 datasource=docker
-            container: gentoo/stage3:latest@sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639
+            container: gentoo/stage3:latest@sha256:d1255d75f9b34bf68745a8c38f307513e9a6fc97e464abbc638eb4d4319991b2
             install: >-
               emerge-webrsync -q &&
               emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
@@ -283,7 +283,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.21.1/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.22.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
