@@ -6,7 +6,7 @@
 
 #![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
 
-use std::{convert::TryFrom as _, mem, os::raw::c_void, pin::Pin};
+use std::{mem, os::raw::c_void, pin::Pin};
 
 use enum_map::EnumMap;
 use log::debug;

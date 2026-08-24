@@ -4,9 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    convert::TryFrom as _, marker::PhantomData, os::raw::c_uint, ptr::null_mut, slice::Iter,
-};
+use std::{marker::PhantomData, os::raw::c_uint, ptr::null_mut, slice::Iter};
 
 use crate::{Res, nss_prelude::*, null_safe_slice};
 
