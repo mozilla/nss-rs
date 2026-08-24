@@ -138,7 +138,7 @@ windows = { version = ">=0.60,<0.63", features = ["Win32_Security_Authentication
 [build-dependencies]
 bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
 mozbuild = { version = "0.1", default-features = false, optional = true }
-semver = { version = "1", default-features = false, features = ["std"] }
+pkg-config = { version = "0.3.33", default-features = false }
 serde = { version = "1", default-features = false, features = ["std"] }
 serde_derive = { version = "1", default-features = false }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
@@ -147,7 +147,7 @@ toml = { version = "0.9", default-features = false, features = ["parse", "serde"
 test-fixture = { path = "test-fixture" }
 
 [package.metadata.cargo-machete]
-ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
+ignored = ["bindgen", "pkg-config", "serde", "serde_derive", "toml"]
 
 [lints]
 workspace = true
