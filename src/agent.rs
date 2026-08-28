@@ -921,9 +921,19 @@ impl SecretAgent {
             // Within this scope, _h maintains a mutable reference to self.io.
             let _h = self.io.wrap(input);
             match self.state {
-                HandshakeState::Authenticated(err) => unsafe {
-                    ssl::SSL_AuthCertificateComplete(self.fd, err)
-                },
+                HandshakeState::Authenticated(err) => {
+                    let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, err) };
+                    // SSL_AuthCertificateComplete reports SECSuccess even when
+                    // `err` rejects the certificate, so its result cannot stand
+                    // in for handshake progress. When the certificate was
+                    // rejected, force the handshake so the failure surfaces
+                    // instead of a bogus completion.
+                    if err == 0 {
+                        rv
+                    } else {
+                        unsafe { ssl::SSL_ForceHandshake(self.fd) }
+                    }
+                }
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
             }
         };
