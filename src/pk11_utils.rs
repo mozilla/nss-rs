@@ -9,6 +9,16 @@ use crate::err::{Error, Res};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pkcs11Uri {
     pub token: Option<String>,
+    /// `object=` attribute. For RSA / asymmetric uses this is typically a
+    /// certificate label; for symmetric uses it's a key label.
+    pub object: Option<String>,
+    /// `id=` attribute (percent-decoded raw bytes). Identifies an object
+    /// by PKCS#11 CKA_ID rather than label.
+    pub id: Option<Vec<u8>>,
+    /// `type=` attribute: `public`, `private`, `cert`, `secret-key`, or
+    /// `data`. Callers use this to pick the right NSS lookup (e.g.
+    /// `find_cert_by_nickname` vs `find_key_by_nickname`).
+    pub object_type: Option<String>,
 }
 
 fn percent_decode(s: &str) -> String {
@@ -53,15 +63,27 @@ pub fn parse(uri: &str) -> Res<Pkcs11Uri> {
     let path = uri.strip_prefix("pkcs11:").ok_or(Error::InvalidInput)?;
 
     let mut token = None;
+    let mut object = None;
+    let mut id = None;
+    let mut object_type = None;
     for attr in path.split(';') {
-        if let Some((key, value)) = attr.split_once('=')
-            && key == "token"
-        {
-            token = Some(percent_decode(value));
+        if let Some((key, value)) = attr.split_once('=') {
+            match key {
+                "token" => token = Some(percent_decode(value)),
+                "object" => object = Some(percent_decode(value)),
+                "id" => id = Some(percent_decode(value).into_bytes()),
+                "type" => object_type = Some(percent_decode(value)),
+                _ => {}
+            }
         }
     }
 
-    Ok(Pkcs11Uri { token })
+    Ok(Pkcs11Uri {
+        token,
+        object,
+        id,
+        object_type,
+    })
 }
 
 /// Build a PKCS#11 URI from a token name.
@@ -119,5 +141,27 @@ mod tests {
         let uri_str = build(name);
         let parsed = parse(&uri_str).unwrap();
         assert_eq!(parsed.token.as_deref(), Some(name));
+    }
+
+    #[test]
+    fn parse_object_id_type() {
+        fixture_init();
+        let uri = parse(
+            "pkcs11:token=YubiKey%20PIV;object=Key%20Management;id=%03;type=public",
+        )
+        .unwrap();
+        assert_eq!(uri.token.as_deref(), Some("YubiKey PIV"));
+        assert_eq!(uri.object.as_deref(), Some("Key Management"));
+        assert_eq!(uri.id, Some(b"\x03".to_vec()));
+        assert_eq!(uri.object_type.as_deref(), Some("public"));
+    }
+
+    #[test]
+    fn parse_no_extra_attrs() {
+        fixture_init();
+        let uri = parse("pkcs11:token=NSS%20Certificate%20DB").unwrap();
+        assert_eq!(uri.object, None);
+        assert_eq!(uri.id, None);
+        assert_eq!(uri.object_type, None);
     }
 }
