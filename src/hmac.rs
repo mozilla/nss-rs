@@ -13,8 +13,9 @@ use crate::{
     err::IntoResult as _,
     hash::{self, HashAlgorithm},
     p11::{
-        self, CK_ATTRIBUTE_TYPE, CKA_SIGN, PK11_CreateContextBySymKey, PK11_DigestFinal,
-        PK11_DigestOp, PK11_ImportSymKey, PK11Origin, SECOidTag, Slot,
+        CK_MECHANISM_TYPE, CKA_SIGN, CKM_SHA256_HMAC, CKM_SHA384_HMAC, CKM_SHA512_HMAC,
+        PK11_CreateContextBySymKey, PK11_DigestFinal, PK11_DigestOp, PK11_ImportSymKey, PK11Origin,
+        SECOidTag, Slot,
     },
 };
 
@@ -28,13 +29,11 @@ pub enum HmacAlgorithm {
     HMAC_SHA2_512,
 }
 
-#[allow(clippy::allow_attributes)]
-#[allow(clippy::useless_conversion)]
-fn hmac_alg_to_ckm(alg: &HmacAlgorithm) -> p11::CK_MECHANISM_TYPE {
+const fn hmac_alg_to_ckm(alg: &HmacAlgorithm) -> CK_MECHANISM_TYPE {
     match alg {
-        HmacAlgorithm::HMAC_SHA2_256 => p11::CKM_SHA256_HMAC.into(),
-        HmacAlgorithm::HMAC_SHA2_384 => p11::CKM_SHA384_HMAC.into(),
-        HmacAlgorithm::HMAC_SHA2_512 => p11::CKM_SHA512_HMAC.into(),
+        HmacAlgorithm::HMAC_SHA2_256 => CKM_SHA256_HMAC,
+        HmacAlgorithm::HMAC_SHA2_384 => CKM_SHA384_HMAC,
+        HmacAlgorithm::HMAC_SHA2_512 => CKM_SHA512_HMAC,
     }
 }
 
@@ -76,7 +75,7 @@ pub fn hmac(alg: &HmacAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, Err
             *slot,
             hmac_alg_to_ckm(alg),
             PK11Origin::PK11_OriginUnwrap,
-            CK_ATTRIBUTE_TYPE::from(CKA_SIGN),
+            CKA_SIGN,
             SECItemBorrowed::wrap(key)?.as_mut(),
             ptr::null_mut(),
         )
@@ -84,13 +83,8 @@ pub fn hmac(alg: &HmacAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, Err
     };
     let param = SECItemBorrowed::make_empty();
     let context = unsafe {
-        PK11_CreateContextBySymKey(
-            hmac_alg_to_ckm(alg),
-            CK_ATTRIBUTE_TYPE::from(CKA_SIGN),
-            *sym_key,
-            param.as_ref(),
-        )
-        .into_result()?
+        PK11_CreateContextBySymKey(hmac_alg_to_ckm(alg), CKA_SIGN, *sym_key, param.as_ref())
+            .into_result()?
     };
     unsafe {
         PK11_DigestOp(*context, data.as_ptr(), data_len).into_result()?;

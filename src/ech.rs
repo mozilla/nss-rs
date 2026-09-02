@@ -17,7 +17,10 @@ use crate::{
     SECItem, SECItemBorrowed, SECItemMut, der,
     err::{Error, Res, ssl::SSL_ERROR_ECH_RETRY_WITH_ECH},
     experimental_api, null_safe_slice,
-    p11::{self, PrivateKey, PublicKey, SECKEYPrivateKey, SECKEYPublicKey, Slot},
+    p11::{
+        self, CKF_DERIVE, CKM_EC_KEY_PAIR_GEN, PrivateKey, PublicKey, SECKEYPrivateKey,
+        SECKEYPublicKey, Slot,
+    },
     prio::PRFileDesc,
     ssl::PRBool,
 };
@@ -109,12 +112,12 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
         unsafe {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
-                p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
+                CKM_EC_KEY_PAIR_GEN,
                 addr_of_mut!(param_item).cast(),
                 &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
-                p11::CK_FLAGS::from(p11::CKF_DERIVE),
-                p11::CK_FLAGS::from(p11::CKF_DERIVE),
+                CKF_DERIVE,
+                CKF_DERIVE,
                 null_mut(),
             )
         }
@@ -126,12 +129,12 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
         unsafe {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
-                p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
+                CKM_EC_KEY_PAIR_GEN,
                 addr_of_mut!(param_item).cast(),
                 &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
-                p11::CK_FLAGS::from(p11::CKF_DERIVE),
-                p11::CK_FLAGS::from(p11::CKF_DERIVE),
+                CKF_DERIVE,
+                CKF_DERIVE,
                 null_mut(),
             )
         }

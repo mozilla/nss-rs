@@ -19,17 +19,16 @@ use crate::{
     constants::{Cipher, Version},
     err::{Error, Res, secstatus_to_res},
     p11::{
-        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, CKA_ENCRYPT, CKM_AES_ECB,
-        CKM_CHACHA20, Context, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
-        PK11_GetBlockSize, PK11SymKey, SymKey,
+        CK_CHACHA20_PARAMS, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, Context, PK11_CipherOp,
+        PK11_CreateContextBySymKey, PK11_Encrypt, PK11_GetBlockSize, PK11SymKey, SymKey,
     },
 };
 
 fn make_aes_ctx(key: &SymKey) -> Res<Context> {
     Context::from_ptr(unsafe {
         PK11_CreateContextBySymKey(
-            CK_MECHANISM_TYPE::from(CKM_AES_ECB),
-            CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
+            CKM_AES_ECB,
+            CKA_ENCRYPT,
             **key,
             SECItemBorrowed::make_empty().as_ref(),
         )
@@ -76,7 +75,7 @@ impl Key {
                 0,
                 l.as_ptr().cast(),
                 c_uint::try_from(l.len())?,
-                CK_MECHANISM_TYPE::from(mech),
+                mech,
                 spec.key_len(),
                 &raw mut secret,
             )
@@ -89,9 +88,7 @@ impl Key {
                 AeadAlgorithms::Aes128Gcm | AeadAlgorithms::Aes256Gcm => 16,
                 AeadAlgorithms::ChaCha20Poly1305 => 64,
             },
-            usize::try_from(unsafe {
-                PK11_GetBlockSize(CK_MECHANISM_TYPE::from(mech), null_mut())
-            })?
+            usize::try_from(unsafe { PK11_GetBlockSize(mech, null_mut()) })?
         );
         Ok(kind)
     }
@@ -141,7 +138,7 @@ impl Key {
                 secstatus_to_res(unsafe {
                     PK11_Encrypt(
                         **key,
-                        CK_MECHANISM_TYPE::from(CKM_CHACHA20),
+                        CKM_CHACHA20,
                         std::ptr::from_mut(param_item.as_mut()),
                         output[..].as_mut_ptr(),
                         &raw mut output_len,

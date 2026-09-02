@@ -101,7 +101,7 @@ impl PublicKey {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePubKey,
                 (**self).cast(),
-                CK_ATTRIBUTE_TYPE::from(CKA_EC_POINT),
+                CKA_EC_POINT,
                 key_item.as_mut(),
             )
         })?;
@@ -139,7 +139,7 @@ impl PrivateKey {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePrivKey,
                 (**self).cast(),
-                CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
+                CKA_VALUE,
                 key_item.as_mut(),
             )
         })?;
@@ -234,7 +234,7 @@ impl Slot {
                 null_mut(),
                 c_int::try_from(key_size).map_err(|_| Error::IntegerOverflow)?,
                 null_mut(),
-                CK_FLAGS::from(CKF_ENCRYPT | CKF_DECRYPT),
+                CKF_ENCRYPT | CKF_DECRYPT,
                 PK11AttrFlags::from(PK11_ATTR_TOKEN | PK11_ATTR_PRIVATE | PK11_ATTR_SENSITIVE),
                 null_mut(),
             ))

@@ -19,7 +19,10 @@ use std::{
     process::Command,
 };
 
-use bindgen::Builder;
+use bindgen::{
+    Builder,
+    callbacks::{IntKind, ParseCallbacks},
+};
 use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
 
@@ -357,6 +360,31 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     vec![nsprinclude, nssinclude]
 }
 
+/// Type PKCS#11 `#define`s as the `CK_*` typedefs they belong to. Bindgen otherwise picks the
+/// smallest integer that fits the value, which needs a conversion at every use.
+#[derive(Debug)]
+struct Pkcs11Types;
+
+impl ParseCallbacks for Pkcs11Types {
+    fn int_macro(&self, name: &str, _: i64) -> Option<IntKind> {
+        // `CKD_*` gets CK_ULONG because CK_EC_KDF_TYPE isn't among the generated types, and
+        // that is what PK11_PubDeriveWithKDF's `kdf` parameter is declared as anyway.
+        let name = match name {
+            "CK_TRUE" | "CK_FALSE" => "CK_BBOOL",
+            n if n.starts_with("CKA_") => "CK_ATTRIBUTE_TYPE",
+            n if n.starts_with("CKF_") => "CK_FLAGS",
+            n if n.starts_with("CKG_") => "CK_GENERATOR_FUNCTION",
+            n if n.starts_with("CKM_") => "CK_MECHANISM_TYPE",
+            n if n.starts_with("CKD_") || n.starts_with("CK_") => "CK_ULONG",
+            _ => return None,
+        };
+        Some(IntKind::Custom {
+            name,
+            is_signed: false,
+        })
+    }
+}
+
 fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
     let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
@@ -368,6 +396,7 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
     let mut builder = Builder::default().header(header);
     builder = builder.generate_comments(false);
     builder = builder.size_t_is_usize(true);
+    builder = builder.parse_callbacks(Box::new(Pkcs11Types));
 
     builder = builder.clang_arg("-v");
 

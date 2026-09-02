@@ -22,9 +22,9 @@ use crate::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     p11::{
-        self, CK_ATTRIBUTE_TYPE, CK_GENERATOR_FUNCTION, CK_MECHANISM_TYPE, CKA_DECRYPT,
-        CKA_ENCRYPT, CKA_NSS_MESSAGE, CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM,
-        CKM_CHACHA20_POLY1305, Context, PK11_AEADOp, PK11_CreateContextBySymKey,
+        self, CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE, CKA_DECRYPT, CKA_ENCRYPT, CKA_NSS_MESSAGE,
+        CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305, Context,
+        PK11_AEADOp, PK11_CreateContextBySymKey,
     },
     secstatus_to_res,
 };
@@ -128,14 +128,7 @@ fn expand_hkdf_label(
     label: &str,
     key_len: c_uint,
 ) -> Res<SymKey> {
-    expand_label(
-        version,
-        cipher,
-        secret,
-        label,
-        CK_MECHANISM_TYPE::from(CKM_HKDF_DATA),
-        key_len,
-    )
+    expand_label(version, cipher, secret, label, CKM_HKDF_DATA, key_len)
 }
 
 /// Derive a fixed-size raw key buffer using HKDF-Data.  The const generic `N`
@@ -203,14 +196,12 @@ pub enum Mode {
 }
 
 impl Mode {
-    fn p11mode(self) -> CK_ATTRIBUTE_TYPE {
-        CK_ATTRIBUTE_TYPE::from(
-            CKA_NSS_MESSAGE
-                | match self {
-                    Self::Encrypt => CKA_ENCRYPT,
-                    Self::Decrypt => CKA_DECRYPT,
-                },
-        )
+    const fn p11mode(self) -> CK_ATTRIBUTE_TYPE {
+        CKA_NSS_MESSAGE
+            | match self {
+                Self::Encrypt => CKA_ENCRYPT,
+                Self::Decrypt => CKA_DECRYPT,
+            }
     }
 }
 
@@ -231,11 +222,11 @@ impl AeadAlgorithms {
     }
 
     #[must_use]
-    pub fn p11_mech(self) -> CK_MECHANISM_TYPE {
-        CK_MECHANISM_TYPE::from(match self {
+    pub const fn p11_mech(self) -> CK_MECHANISM_TYPE {
+        match self {
             Self::Aes128Gcm | Self::Aes256Gcm => CKM_AES_GCM,
             Self::ChaCha20Poly1305 => CKM_CHACHA20_POLY1305,
-        })
+        }
     }
 }
 
@@ -269,7 +260,7 @@ impl Aead {
                 *slot,
                 algorithm.p11_mech(),
                 p11::PK11Origin::PK11_OriginUnwrap,
-                CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT | CKA_DECRYPT),
+                CKA_ENCRYPT | CKA_DECRYPT,
                 key_item_ptr,
                 null_mut(),
             )
@@ -315,7 +306,7 @@ impl Aead {
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_GENERATE_COUNTER_XOR),
+                CKG_GENERATE_COUNTER_XOR,
                 c_int_len(NONCE_LEN - COUNTER_LEN)?, // Fixed portion of the nonce.
                 nonce.as_mut_ptr(),
                 c_int_len(nonce.len())?,
@@ -357,7 +348,7 @@ impl Aead {
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_NO_GENERATE),
+                CKG_NO_GENERATE,
                 c_int_len(NONCE_LEN - COUNTER_LEN)?,
                 nonce.as_mut_ptr(),
                 c_int_len(nonce.len())?,
@@ -394,7 +385,7 @@ impl Aead {
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
-                CK_GENERATOR_FUNCTION::from(CKG_NO_GENERATE),
+                CKG_NO_GENERATE,
                 c_int_len(NONCE_LEN - COUNTER_LEN)?, // Fixed portion of the nonce.
                 nonce.as_mut_ptr(),
                 c_int_len(nonce.len())?,
