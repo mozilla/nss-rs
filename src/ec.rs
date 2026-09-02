@@ -6,11 +6,6 @@
 
 use std::ptr;
 
-use pkcs11_bindings::{
-    CK_FALSE, CKA_VALUE, CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN,
-    CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
-};
-
 // use std::ptr::null;
 // use std::ptr::null_mut;
 use crate::{
@@ -18,7 +13,10 @@ use crate::{
     err::{Error, IntoResult as _, secstatus_to_res},
     init,
     p11::{
-        KU_ALL, PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPair,
+        CK_ATTRIBUTE_TYPE, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_OBJECT_HANDLE, CK_ULONG,
+        CKA_SIGN, CKA_VALUE, CKD_NULL, CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN,
+        CKM_EC_MONTGOMERY_KEY_PAIR_GEN, CKM_ECDH1_DERIVE, CKM_SHA512_HMAC, KU_ALL,
+        PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPair,
         PK11_ImportDERPrivateKeyInfoAndReturnKey, PK11_ImportPublicKey, PK11_PubDeriveWithKDF,
         PK11_ReadRawAttribute, PK11ObjectType::PK11_TypePrivKey,
         SECKEY_DecodeDERSubjectPublicKeyInfo, Slot,
@@ -107,12 +105,12 @@ fn ec_curve_to_oid(alg: &EcCurve) -> Vec<u8> {
     }
 }
 
-const fn ec_curve_to_ckm(alg: &EcCurve) -> pkcs11_bindings::CK_MECHANISM_TYPE {
-    match alg {
+fn ec_curve_to_ckm(alg: &EcCurve) -> CK_MECHANISM_TYPE {
+    CK_MECHANISM_TYPE::from(match alg {
         EcCurve::P256 | EcCurve::P384 | EcCurve::P521 => CKM_EC_KEY_PAIR_GEN,
         EcCurve::Ed25519 => CKM_EC_EDWARDS_KEY_PAIR_GEN,
         EcCurve::X25519 => CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
-    }
+    })
 }
 
 //
@@ -144,8 +142,8 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
             ckm,
             oid_ptr.cast(),
             &raw mut pk_ptr,
-            CK_FALSE.into(),
-            CK_FALSE.into(),
+            PRBool::from(false),
+            PRBool::from(false),
             ptr::null_mut(),
         )
         .into_result()?;
@@ -182,7 +180,7 @@ pub fn import_ec_public_key_from_spki(spki: &[u8]) -> Result<PublicKey, Error> {
                 .into_result()?;
 
         let handle = PK11_ImportPublicKey(*slot, *pk, PRBool::from(false));
-        if handle == pkcs11_bindings::CK_INVALID_HANDLE {
+        if handle == CK_OBJECT_HANDLE::from(CK_INVALID_HANDLE) {
             return Err(Error::InvalidInput);
         }
 
@@ -223,7 +221,12 @@ pub fn export_ec_private_key_from_raw(key: &PrivateKey) -> Result<Vec<u8>, Error
     init()?;
     let mut key_item = SECItemMut::make_empty();
     unsafe {
-        PK11_ReadRawAttribute(PK11_TypePrivKey, key.cast(), CKA_VALUE, key_item.as_mut());
+        PK11_ReadRawAttribute(
+            PK11_TypePrivKey,
+            key.cast(),
+            CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
+            key_item.as_mut(),
+        );
     }
     Ok(key_item.as_slice().to_owned())
 }
@@ -237,11 +240,11 @@ pub fn ecdh(sk: &PrivateKey, pk: &PublicKey) -> Result<Vec<u8>, Error> {
             0,
             ptr::null_mut(),
             ptr::null_mut(),
-            pkcs11_bindings::CKM_ECDH1_DERIVE,
-            pkcs11_bindings::CKM_SHA512_HMAC,
-            pkcs11_bindings::CKA_SIGN,
+            CK_MECHANISM_TYPE::from(CKM_ECDH1_DERIVE),
+            CK_MECHANISM_TYPE::from(CKM_SHA512_HMAC),
+            CK_ATTRIBUTE_TYPE::from(CKA_SIGN),
             0,
-            pkcs11_bindings::CKD_NULL,
+            CK_ULONG::from(CKD_NULL),
             ptr::null_mut(),
             ptr::null_mut(),
         )

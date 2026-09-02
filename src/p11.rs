@@ -19,8 +19,6 @@ use std::{
     ptr::null_mut,
 };
 
-use pkcs11_bindings::{CKA_EC_POINT, CKA_VALUE};
-
 use crate::{
     err::{Error, Res, secstatus_to_res},
     nss_prelude::SECITEM_FreeItem,
@@ -103,7 +101,7 @@ impl PublicKey {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePubKey,
                 (**self).cast(),
-                CKA_EC_POINT,
+                CK_ATTRIBUTE_TYPE::from(CKA_EC_POINT),
                 key_item.as_mut(),
             )
         })?;
@@ -141,7 +139,7 @@ impl PrivateKey {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePrivKey,
                 (**self).cast(),
-                CKA_VALUE,
+                CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
                 key_item.as_mut(),
             )
         })?;

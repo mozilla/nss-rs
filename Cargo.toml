@@ -127,7 +127,6 @@ sha256 = "c95a4cf93d6939000642254422d71dffccb5c017d0f40733d3e2be18aa93f1be"
 enum-map = { version = "2.7", default-features = false }
 log = { workspace = true }
 once_cell = "1"
-pkcs11-bindings = ">= 0.1.3"
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = "2"
 zeroize = { version = "1", default-features = false, features = ["derive"], optional = true }

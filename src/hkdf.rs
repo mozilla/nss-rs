@@ -13,8 +13,6 @@ use std::{
     ptr::null_mut,
 };
 
-use pkcs11_bindings::{CK_ULONG, CKA_DERIVE, CKA_SIGN, CKM_HKDF_DERIVE, CKM_HKDF_KEY_GEN};
-
 use crate::{
     Error, SECItem, SECItemBorrowed, SECItemType,
     constants::{
@@ -23,9 +21,10 @@ use crate::{
     },
     err::Res,
     p11::{
-        self, CK_ATTRIBUTE_TYPE, CK_BBOOL, CK_INVALID_HANDLE, CK_MECHANISM_TYPE,
-        CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_HKDF_DATA, PK11_ImportDataKey, PK11Origin,
-        PK11SymKey, Slot, SymKey, random,
+        self, CK_ATTRIBUTE_TYPE, CK_BBOOL, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_ULONG,
+        CKA_DERIVE, CKA_SIGN, CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_HKDF_DATA,
+        CKM_HKDF_DERIVE, CKM_HKDF_KEY_GEN, PK11_ImportDataKey, PK11Origin, PK11SymKey, Slot,
+        SymKey, random,
     },
     ssl::CK_OBJECT_HANDLE,
 };

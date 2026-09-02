@@ -8,15 +8,13 @@
 
 use std::{convert::TryFrom as _, ptr};
 
-use pkcs11_bindings::CKA_SIGN;
-
 use crate::{
     Error, SECItemBorrowed,
     err::IntoResult as _,
     hash::{self, HashAlgorithm},
     p11::{
-        self, PK11_CreateContextBySymKey, PK11_DigestFinal, PK11_DigestOp, PK11_ImportSymKey,
-        PK11Origin, SECOidTag, Slot,
+        self, CK_ATTRIBUTE_TYPE, CKA_SIGN, PK11_CreateContextBySymKey, PK11_DigestFinal,
+        PK11_DigestOp, PK11_ImportSymKey, PK11Origin, SECOidTag, Slot,
     },
 };
 
@@ -78,7 +76,7 @@ pub fn hmac(alg: &HmacAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, Err
             *slot,
             hmac_alg_to_ckm(alg),
             PK11Origin::PK11_OriginUnwrap,
-            CKA_SIGN,
+            CK_ATTRIBUTE_TYPE::from(CKA_SIGN),
             SECItemBorrowed::wrap(key)?.as_mut(),
             ptr::null_mut(),
         )
@@ -86,8 +84,13 @@ pub fn hmac(alg: &HmacAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, Err
     };
     let param = SECItemBorrowed::make_empty();
     let context = unsafe {
-        PK11_CreateContextBySymKey(hmac_alg_to_ckm(alg), CKA_SIGN, *sym_key, param.as_ref())
-            .into_result()?
+        PK11_CreateContextBySymKey(
+            hmac_alg_to_ckm(alg),
+            CK_ATTRIBUTE_TYPE::from(CKA_SIGN),
+            *sym_key,
+            param.as_ref(),
+        )
+        .into_result()?
     };
     unsafe {
         PK11_DigestOp(*context, data.as_ptr(), data_len).into_result()?;

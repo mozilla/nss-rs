@@ -12,8 +12,6 @@ use std::{
     ptr::{null, null_mut},
 };
 
-use pkcs11_bindings::{CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20};
-
 use super::{SAMPLE_SIZE, SSL_HkdfExpandLabelWithMech};
 use crate::{
     SECItemBorrowed,
@@ -21,8 +19,9 @@ use crate::{
     constants::{Cipher, Version},
     err::{Error, Res, secstatus_to_res},
     p11::{
-        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, Context, PK11_CipherOp,
-        PK11_CreateContextBySymKey, PK11_Encrypt, PK11_GetBlockSize, PK11SymKey, SymKey,
+        CK_ATTRIBUTE_TYPE, CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE, CKA_ENCRYPT, CKM_AES_ECB,
+        CKM_CHACHA20, Context, PK11_CipherOp, PK11_CreateContextBySymKey, PK11_Encrypt,
+        PK11_GetBlockSize, PK11SymKey, SymKey,
     },
 };
 
