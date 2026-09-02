@@ -370,7 +370,7 @@ impl ParseCallbacks for Pkcs11Types {
         // `CKD_*` gets CK_ULONG because CK_EC_KDF_TYPE isn't among the generated types, and
         // that is what PK11_PubDeriveWithKDF's `kdf` parameter is declared as anyway.
         let name = match name {
-            "CK_TRUE" | "CK_FALSE" => "CK_BBOOL",
+            "CK_INVALID_HANDLE" => "CK_OBJECT_HANDLE",
             n if n.starts_with("CKA_") => "CK_ATTRIBUTE_TYPE",
             n if n.starts_with("CKF_") => "CK_FLAGS",
             n if n.starts_with("CKG_") => "CK_GENERATOR_FUNCTION",
