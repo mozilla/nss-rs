@@ -396,7 +396,9 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
     let mut builder = Builder::default().header(header);
     builder = builder.generate_comments(false);
     builder = builder.size_t_is_usize(true);
-    builder = builder.parse_callbacks(Box::new(Pkcs11Types));
+    if base == "nss_p11" {
+        builder = builder.parse_callbacks(Box::new(Pkcs11Types));
+    }
 
     builder = builder.clang_arg("-v");
 
