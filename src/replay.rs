@@ -17,7 +17,10 @@ use crate::{
 };
 
 // This is an opaque struct in NSS.
-pub enum SSLAntiReplayContext {}
+#[repr(C)]
+pub struct SSLAntiReplayContext {
+    _unused: [u8; 0],
+}
 
 experimental_api!(SSL_CreateAntiReplayContext(
     now: PRTime,
