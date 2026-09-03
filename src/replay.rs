@@ -13,14 +13,9 @@ use std::{
 use crate::{
     err::Res,
     prio::PRFileDesc,
+    ssl::SSLAntiReplayContext,
     time::{Interval, PRTime, Time},
 };
-
-// This is an opaque struct in NSS.
-#[repr(C)]
-pub struct SSLAntiReplayContext {
-    _unused: [u8; 0],
-}
 
 experimental_api!(SSL_CreateAntiReplayContext(
     now: PRTime,
