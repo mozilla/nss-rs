@@ -14,8 +14,8 @@ enums = ["_SECStatus", "SECItemType"]
 types = [
     "HpkeSymmetricSuite",
     "SSLAeadContext",
-    "SSLAntiReplayContext",
     "SSLAlertDescription",
+    "SSLAntiReplayContext",
     "SSLCertificateCompressionAlgorithm",
     "SSLExtensionHandler",
     "SSLExtensionType",
