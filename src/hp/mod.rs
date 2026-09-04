@@ -27,7 +27,7 @@ experimental_api! {
         mech: CK_MECHANISM_TYPE,
         key_size: c_uint,
         secret: *mut *mut PK11SymKey,
-    )
+    );
 }
 
 #[cfg_attr(feature = "blapi", path = "header_protection_blapi.rs")]

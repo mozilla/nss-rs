@@ -24,14 +24,12 @@ experimental_api! {
         k: c_uint,
         bits: c_uint,
         ctx: *mut *mut SSLAntiReplayContext,
-    )
-}
-experimental_api! { SSL_ReleaseAntiReplayContext(ctx: *mut SSLAntiReplayContext) }
-experimental_api! {
+    );
+    SSL_ReleaseAntiReplayContext(ctx: *mut SSLAntiReplayContext);
     SSL_SetAntiReplayContext(
         fd: *mut PRFileDesc,
         ctx: *mut SSLAntiReplayContext,
-    )
+    );
 }
 
 scoped_ptr!(

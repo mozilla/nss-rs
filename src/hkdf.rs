@@ -35,9 +35,7 @@ experimental_api! {
         salt: *mut PK11SymKey,
         ikm: *mut PK11SymKey,
         prk: *mut *mut PK11SymKey,
-    )
-}
-experimental_api! {
+    );
     SSL_HkdfExpandLabel(
         version: Version,
         cipher: Cipher,
@@ -47,7 +45,7 @@ experimental_api! {
         label: *const c_char,
         label_len: c_uint,
         secret: *mut *mut PK11SymKey,
-    )
+    );
 }
 
 #[derive(Clone, Copy, Debug)]

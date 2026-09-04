@@ -26,7 +26,7 @@ experimental_api! {
         fd: *mut PRFileDesc,
         cb: SSLSecretCallback,
         arg: *mut c_void,
-    )
+    );
 }
 
 #[derive(Clone, Copy, Debug, FromRepr)]

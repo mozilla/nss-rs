@@ -33,7 +33,7 @@ experimental_api! {
         fd: *mut PRFileDesc,
         cb: SSLTimeFunc,
         arg: *mut c_void,
-    )
+    );
 }
 
 /// This struct holds the zero time used for converting between `Instant` and `PRTime`.

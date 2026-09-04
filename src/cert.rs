@@ -19,7 +19,7 @@ experimental_api! {
     SSL_PeerCertificateChainDER(
         fd: *mut PRFileDesc,
         out: *mut *mut SECItemArray,
-    )
+    );
 }
 
 pub struct CertificateInfo {

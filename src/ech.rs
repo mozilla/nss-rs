@@ -33,35 +33,23 @@ experimental_api! {
     SSL_EnableTls13GreaseEch(
         fd: *mut PRFileDesc,
         enabled: PRBool,
-    )
-}
-
-experimental_api! {
+    );
     SSL_GetEchRetryConfigs(
         fd: *mut PRFileDesc,
         config: *mut SECItem,
-    )
-}
-
-experimental_api! {
+    );
     SSL_SetClientEchConfigs(
         fd: *mut PRFileDesc,
         config_list: *const u8,
         config_list_len: c_uint,
-    )
-}
-
-experimental_api! {
+    );
     SSL_SetServerEchConfigs(
         fd: *mut PRFileDesc,
         pk: *const SECKEYPublicKey,
         sk: *const SECKEYPrivateKey,
         record: *const u8,
         record_len: c_uint,
-    )
-}
-
-experimental_api! {
+    );
     SSL_EncodeEchConfigId(
         config_id: u8,
         public_name: *const c_char,
@@ -73,7 +61,7 @@ experimental_api! {
         out: *mut u8,
         out_len: *mut c_uint,
         max_len: c_uint,
-    )
+    );
 }
 
 /// Convert any result that contains an ECH error into a result with an `EchRetry`.

@@ -93,67 +93,48 @@ experimental_api! {
         fd: *mut PRFileDesc,
         cb: SSLHelloRetryRequestCallback,
         arg: *mut c_void,
-    )
-}
-experimental_api! {
+    );
     SSL_RecordLayerWriteCallback(
         fd: *mut PRFileDesc,
         cb: SSLRecordWriteCallback,
         arg: *mut c_void,
-    )
-}
-experimental_api! {
+    );
     SSL_RecordLayerData(
         fd: *mut PRFileDesc,
         epoch: Epoch,
         ct: SSLContentType::Type,
         data: *const u8,
         len: c_uint,
-    )
-}
-experimental_api! {
+    );
     SSL_SendSessionTicket(
         fd: *mut PRFileDesc,
         extra: *const u8,
         len: c_uint,
-    )
-}
-experimental_api! { SSL_SetMaxEarlyDataSize(fd: *mut PRFileDesc, size: u32) }
-experimental_api! {
+    ); 
+    SSL_SetMaxEarlyDataSize(fd: *mut PRFileDesc, size: u32);
     SSL_SetResumptionToken(
         fd: *mut PRFileDesc,
         token: *const u8,
         len: c_uint,
-    )
-}
-experimental_api! {
+    );
     SSL_SetResumptionTokenCallback(
         fd: *mut PRFileDesc,
         cb: SSLResumptionTokenCallback,
         arg: *mut c_void,
-    )
-}
-
-experimental_api! {
+    );
     SSL_GetResumptionTokenInfo(
         token: *const u8,
         token_len: c_uint,
         info: *mut SSLResumptionTokenInfo,
         len: c_uint,
-    )
-}
-
-experimental_api! {
+    );
     SSL_DestroyResumptionTokenInfo(
         info: *mut SSLResumptionTokenInfo,
-    )
-}
-
-experimental_api! {
+    );
     SSL_SetCertificateCompressionAlgorithm(
         fd: *mut PRFileDesc,
         t: SSLCertificateCompressionAlgorithm,
-    )
+    );
 }
 
 #[cfg(test)]
