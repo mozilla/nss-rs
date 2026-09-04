@@ -110,7 +110,7 @@ experimental_api! {
         fd: *mut PRFileDesc,
         extra: *const u8,
         len: c_uint,
-    ); 
+    );
     SSL_SetMaxEarlyDataSize(fd: *mut PRFileDesc, size: u32);
     SSL_SetResumptionToken(
         fd: *mut PRFileDesc,
