@@ -2,11 +2,6 @@ name: NSS head
 on:
   schedule:
     - cron: "17 5 * * *"
-  # FIXME: Remove before merging; a PR can edit its way to the Bugzilla key.
-  pull_request:
-    paths:
-      - .github/workflows/nss-head.yml
-      - .github/scripts/nss-check.sh
   workflow_dispatch:
     inputs:
       last-good:
@@ -22,8 +17,7 @@ on:
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}
 
 permissions:
   contents: read
@@ -94,8 +88,7 @@ jobs:
       - id: meta
         uses: $/.github/actions/nss-metadata
 
-      # FIXME: Untagged main, for the Windows gyp fix in mozilla/actions#141.
-      - uses: mozilla/actions/nss@264c6b750df669adb58286a26c5d0e04e839e06b # main
+      - uses: mozilla/actions/nss@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
         with:
           deps-only: true
 
@@ -156,6 +149,7 @@ jobs:
           git -C "$NSS_DIR" checkout --quiet "$last_good"
           if ! "$CHECK" > last-good.log 2>&1; then
             echo "::warning::nss-rs fails at the last known-good $last_good too, so the range is wrong or the build is broken"
+            echo "SELF_BROKEN=true" >> "$GITHUB_ENV"
           else
             git -C "$NSS_DIR" bisect start "$HEAD_SHA" "$last_good"
             # Only a converged run leaves refs/bisect/bad on the first bad commit;
@@ -180,9 +174,11 @@ jobs:
           OS: ${{ matrix.os }}
         run: |
           jq -n --arg os "$OS" --arg broken "$BROKEN" \
+            --arg no_build "${NO_BUILD:-false}" --arg self_broken "${SELF_BROKEN:-false}" \
             --arg first_bad "${FIRST_BAD:-}" --arg subject "${SUBJECT:-}" \
             --rawfile log nss-head.log \
-            '{os: $os, broken: ($broken == "true"),
+            '{os: $os, broken: ($broken == "true"), no_build: ($no_build == "true"),
+              self_broken: ($self_broken == "true"),
               first_bad: $first_bad, subject: $subject, log: $log[-4000:]}' > verdict.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -238,13 +234,14 @@ jobs:
           jq -r '.[] | "\(if .broken then "FAIL" else "ok" end)\t\(.os)\t\(.first_bad)"' all.json
           {
             echo "BROKEN=$(jq -r 'any(.broken) | tostring' all.json)"
+            echo "NO_BUILD=$(jq -r '[.[] | select(.broken)] | (length > 0 and all(.no_build)) | tostring' all.json)"
             # Changes whenever the set of failing platforms or their commits does.
             echo "FINGERPRINT=$(jq -cS 'map(select(.broken) | {os, first_bad})' all.json \
               | sha256sum | cut -c1-12)"
           } >> "$GITHUB_ENV"
 
       - name: Report to Bugzilla
-        if: github.event_name != 'pull_request' && env.BUGZILLA_API_KEY != ''
+        if: env.BUGZILLA_API_KEY != ''
         env:
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
@@ -286,8 +283,10 @@ jobs:
 
           failed=$(jq -r '[.[] | select(.broken) | .os] | join(", ")' all.json)
           detail=$(jq -r '.[] | select(.broken) |
-            "## \(.os)\n\nFirst bad commit: \(if .first_bad == "" then "bisect inconclusive"
-              else "\(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(.log)\n```\n"' all.json)
+            "## \(.os)\n\n\(if .no_build then "NSS head does not build."
+              elif .self_broken then "nss-rs also fails at the last known-good revision, so this may not be an NSS regression."
+              elif .first_bad == "" then "First bad commit: bisect inconclusive"
+              else "First bad commit: \(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(.log)\n```\n"' all.json)
           body=$(cat <<EOF
           Building and testing nss-rs (https://github.com/mozilla/nss-rs) against NSS
           head $HEAD_SHA fails on: $failed
@@ -298,6 +297,10 @@ jobs:
           nss-rs-fingerprint: $FINGERPRINT
           EOF
           )
+          if [ "$NO_BUILD" == "true" ]; then
+            echo "::warning::NSS head does not build on $failed; not filing"
+            exit 0
+          fi
           summary="nss-rs fails against NSS head on $failed"
           if [ -z "$id" ]; then
             id=$(mutate POST bug "$(jq -n --arg s "$summary" \
@@ -305,10 +308,12 @@ jobs:
               '{product: "NSS", component: "Libraries", version: "trunk", type: "defect",
                 summary: $s, description: $d, whiteboard: $w}')" | jq -r '.id')
             echo "::notice::Filed $show$id"
-          elif bz GET "bug/$id/comment" | grep -qF "$FINGERPRINT"; then
+          elif ! comments=$(bz GET "bug/$id/comment"); then
+            echo "::error::Could not read the comments on bug $id"; exit 1
+          elif grep -qF "$FINGERPRINT" <<< "$comments"; then
             echo "Bug $id already reports this set of failures."
           else
-            # The failing set changed, so the old summary no longer describes it.
+            # The failing set changed, so the summary is stale.
             mutate PUT "bug/$id" "$(jq -n --arg s "$summary" --arg d "$body" \
               '{summary: $s, comment: {body: $d}}')" > /dev/null
             echo "::notice::Updated $show$id"
