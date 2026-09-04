@@ -16,9 +16,16 @@ on:
         description: "Log the Bugzilla changes instead of making them."
         type: boolean
         default: false
+      test-bugzilla:
+        description: "Report to the Bugzilla dev instance, using BUGZILLA_TEST_API_KEY."
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede a pull request's earlier runs, but never interrupt a bisect that a
+  # schedule or a manual dispatch started.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -128,13 +135,24 @@ jobs:
             last_good=$(git -C "$NSS_DIR" rev-parse "NSS_${MIN_VERSION//./_}_RTM^{commit}")
             echo "Bisecting from the $MIN_VERSION tag at $last_good"
           fi
-          git -C "$NSS_DIR" bisect start "$HEAD_SHA" "$last_good"
-          git -C "$NSS_DIR" bisect run "$CHECK" 2>&1 | tee bisect.log || true
-          first_bad=$(git -C "$NSS_DIR" rev-parse refs/bisect/bad 2>/dev/null || true)
-          git -C "$NSS_DIR" bisect reset
-          # Report the platform as failing anyway, rather than suppressing it.
-          [ -n "$first_bad" ] \
-            || echo "::warning::Bisect between $last_good and $HEAD_SHA identified no commit"
+          # Bisect never tests its endpoints, so an environment that fails at
+          # every revision would otherwise pin the blame on the oldest one.
+          first_bad=""
+          git -C "$NSS_DIR" checkout --quiet "$last_good"
+          if ! "$CHECK" > last-good.log 2>&1; then
+            echo "::warning::nss-rs fails at the last known-good $last_good too, so the range is wrong or the build is broken"
+          else
+            git -C "$NSS_DIR" bisect start "$HEAD_SHA" "$last_good"
+            # Only a converged run leaves refs/bisect/bad on the first bad commit;
+            # after an abort it still points at the last revision tested.
+            if git -C "$NSS_DIR" bisect run "$CHECK" 2>&1 | tee bisect.log; then
+              first_bad=$(git -C "$NSS_DIR" rev-parse refs/bisect/bad)
+            else
+              echo "::warning::Bisect between $last_good and $HEAD_SHA did not converge"
+            fi
+            git -C "$NSS_DIR" bisect reset
+          fi
+          git -C "$NSS_DIR" checkout --quiet "$HEAD_SHA"
           {
             echo "FIRST_BAD=$first_bad"
             echo "SUBJECT=$(git -C "$NSS_DIR" log -1 --format=%s "$first_bad" 2>/dev/null || true)"
@@ -159,6 +177,7 @@ jobs:
           path: |
             verdict.json
             nss-head.log
+            last-good.log
             bisect.log
           if-no-files-found: ignore
 
@@ -179,10 +198,12 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     env:
-      BUGZILLA: https://bugzilla.mozilla.org/rest
+      # The dev instance mirrors the NSS product, so reporting can be exercised
+      # end to end without touching real bugs.
+      BUGZILLA: ${{ inputs.test-bugzilla && 'https://bugzilla-dev.allizom.org/rest' || 'https://bugzilla.mozilla.org/rest' }}
       # Identifies the bug this workflow owns, so it can update and close it.
       MARKER: "[nss-rs-head]"
-      BUGZILLA_API_KEY: ${{ secrets.BUGZILLA_API_KEY }} # zizmor: ignore[secrets-outside-env]
+      BUGZILLA_API_KEY: ${{ inputs.test-bugzilla && secrets.BUGZILLA_TEST_API_KEY || secrets.BUGZILLA_API_KEY }} # zizmor: ignore[secrets-outside-env]
       HEAD_SHA: ${{ needs.setup.outputs.head }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
