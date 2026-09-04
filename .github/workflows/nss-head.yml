@@ -35,7 +35,7 @@ defaults:
     shell: bash
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: never
   RUST_BACKTRACE: 1
   NSS_REPO: https://github.com/mozilla/nss.git
 
@@ -97,19 +97,27 @@ jobs:
         with:
           deps-only: true
 
-      # Full history for NSS, because bisect needs the range and the release tags.
-      - name: Check out NSS and NSPR
-        run: |
-          git clone --quiet "$NSS_REPO" "$NSS_DIR"
-          git -C "$NSS_DIR" checkout --quiet "$HEAD_SHA"
-          git clone --quiet --depth 1 https://github.com/mozilla/nspr.git nspr
+      # Full history for the bisect range and tags; build.sh wants NSPR beside NSS.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mozilla/nss
+          ref: ${{ needs.setup.outputs.head }}
+          path: nss
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mozilla/nspr
+          path: nspr
+          persist-credentials: false
 
       - name: Restore last known-good NSS commit
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .nss-last-good
-          key: ${{ env.CACHE_KEY }}-${{ github.run_id }}
-          restore-keys: ${{ env.CACHE_KEY }}-
+          key: ${{ env.CACHE_KEY }}--${{ github.run_id }}
+          restore-keys: ${{ env.CACHE_KEY }}--
 
       - name: Test NSS head
         run: |
@@ -131,8 +139,9 @@ jobs:
           # Fall back to the release the crate declares as its floor, which also
           # covers a cache miss or a last-good commit head no longer descends from.
           if [ -z "$last_good" ] || ! git -C "$NSS_DIR" merge-base --is-ancestor "$last_good" "$HEAD_SHA"; then
-            last_good=$(git -C "$NSS_DIR" rev-parse "NSS_${MIN_VERSION//./_}_RTM^{commit}")
-            echo "Bisecting from the $MIN_VERSION tag at $last_good"
+            # The tag sits on a release branch, so take the branch point.
+            last_good=$(git -C "$NSS_DIR" merge-base "NSS_${MIN_VERSION//./_}_RTM^{commit}" "$HEAD_SHA")
+            echo "Bisecting from the $MIN_VERSION branch point at $last_good"
           fi
           # Bisect never tests its endpoints, so an environment that fails at
           # every revision would otherwise pin the blame on the oldest one.
@@ -184,7 +193,7 @@ jobs:
         if: env.BROKEN == 'false'
         with:
           path: .nss-last-good
-          key: ${{ env.CACHE_KEY }}-${{ github.run_id }}
+          key: ${{ env.CACHE_KEY }}--${{ github.run_id }}
 
       # Last, so that the verdict is recorded and uploaded either way.
       - name: Fail this platform
@@ -202,8 +211,10 @@ jobs:
       BUGZILLA: ${{ inputs.test-bugzilla && 'https://bugzilla-dev.allizom.org/rest' || 'https://bugzilla.mozilla.org/rest' }}
       # Identifies the bug this workflow owns, so it can update and close it.
       MARKER: "[nss-rs-head]"
-      BUGZILLA_API_KEY: ${{ inputs.test-bugzilla && secrets.BUGZILLA_TEST_API_KEY || secrets.BUGZILLA_API_KEY }} # zizmor: ignore[secrets-outside-env]
+      # A missing test key must not fall through to the production one.
+      BUGZILLA_API_KEY: ${{ inputs.test-bugzilla && secrets.BUGZILLA_TEST_API_KEY || (!inputs.test-bugzilla && secrets.BUGZILLA_API_KEY) || '' }} # zizmor: ignore[secrets-outside-env]
       HEAD_SHA: ${{ needs.setup.outputs.head }}
+      HEAD_RESULT: ${{ needs.head.result }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -234,7 +245,8 @@ jobs:
           bz() {
             local method=$1 path=$2
             shift 2
-            curl -fsSL -X "$method" "$BUGZILLA/$path" \
+            # No -L: curl keeps custom headers across a cross-host redirect.
+            curl -fsS -X "$method" "$BUGZILLA/$path" \
               -H "X-BUGZILLA-API-KEY: $BUGZILLA_API_KEY" \
               -H "Content-Type: application/json" "$@"
           }
@@ -246,12 +258,15 @@ jobs:
           }
           show="${BUGZILLA%/rest}/show_bug.cgi?id="
           id=$(bz GET bug -G \
-            --data-urlencode "product=NSS" \
             --data-urlencode "whiteboard=$MARKER" \
             --data-urlencode "resolution=---" \
+            --data-urlencode "order=bug_id" \
             --data-urlencode "include_fields=id" | jq -r '.bugs[0].id // ""')
 
           if [ "$BROKEN" == "false" ]; then
+            # A timed-out platform uploads no verdict, so the rest look green.
+            [ "$HEAD_RESULT" == "success" ] ||
+              { echo "::warning::Not every platform reported; leaving bug $id alone"; exit 0; }
             [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
             body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
             mutate PUT "bug/$id" "$(jq -n --arg c "$body" \
