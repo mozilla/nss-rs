@@ -45,8 +45,9 @@ jobs:
         run: |
           nss=$(git ls-remote "$NSS_REPO" HEAD | cut -f1)
           nspr=$(git ls-remote "$NSPR_REPO" HEAD | cut -f1)
-          [ -n "$nss" ] && [ -n "$nspr" ] ||
-            { echo "::error::Could not resolve NSS or NSPR HEAD"; exit 1; }
+          if [ -z "$nss" ] || [ -z "$nspr" ]; then
+            echo "::error::Could not resolve NSS or NSPR HEAD"; exit 1
+          fi
           echo "Testing NSS $nss with NSPR $nspr"
           { echo "sha=$nss"; echo "nspr=$nspr"; } >> "$GITHUB_OUTPUT"
 
