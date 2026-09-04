@@ -92,7 +92,8 @@ jobs:
       - id: meta
         uses: $/.github/actions/nss-metadata
 
-      - uses: mozilla/actions/nss@47d5a4be3c5b5a3fc45476739dc22b0ba9ca749f # v2.0.7
+      # FIXME: Untagged main, for the Windows gyp fix in mozilla/actions#141.
+      - uses: mozilla/actions/nss@264c6b750df669adb58286a26c5d0e04e839e06b # main
         with:
           deps-only: true
 
