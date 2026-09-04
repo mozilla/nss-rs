@@ -180,7 +180,10 @@ jobs:
             --rawfile log nss-head.log \
             '{os: $os, broken: ($broken == "true"), no_build: ($no_build == "true"),
               self_broken: ($self_broken == "true"),
-              first_bad: $first_bad, subject: $subject, log: $log[-4000:]}' > verdict.json
+              first_bad: $first_bad, subject: $subject,
+              log: ($log | split("\n") | (map(test("error:|panicked at|^failures:")) | index(true) // 0) as $i
+                | .[$i:] | join("\n") | .[:10000]
+                | if length == 10000 then sub("\n[^\n]*$"; "") else . end)}' > verdict.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
@@ -283,14 +286,15 @@ jobs:
           fi
 
           failed=$(jq -r '[.[] | select(.broken) | .os] | join(", ")' all.json)
-          detail=$(jq -r '.[] | select(.broken) |
+          # Bugzilla caps a comment at 65535, however many platforms failed.
+          budget=$(jq -r '(55000 / ([.[] | select(.broken)] | length)) | floor' all.json)
+          detail=$(jq -r --argjson n "$budget" '.[] | select(.broken) |
             "## \(.os)\n\n\(if .no_build then "NSS head does not build."
               elif .self_broken then "nss-rs also fails at the last known-good revision, so this may not be an NSS regression."
               elif .first_bad == "" then "First bad commit: bisect inconclusive"
-              else "First bad commit: \(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(.log)\n```\n"' all.json)
+              else "First bad commit: \(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(.log[:$n])\n```\n"' all.json)
           body=$(cat <<EOF
-          Building and testing nss-rs (https://github.com/mozilla/nss-rs) against NSS
-          head $HEAD_SHA fails on: $failed
+          Building and testing nss-rs (https://github.com/mozilla/nss-rs) against NSS head $HEAD_SHA fails on: $failed
 
           $detail
 
@@ -302,7 +306,9 @@ jobs:
             echo "::warning::NSS head does not build on $failed; not filing"
             exit 0
           fi
-          summary="nss-rs fails against NSS head on $failed"
+          culprit=$(jq -r '[.[] | select(.broken) | .first_bad] | unique
+            | if length == 1 and .[0] != "" then "; first bad commit \(.[0][0:12])" else "" end' all.json)
+          summary="nss-rs fails against NSS head$culprit"
           if [ -z "$id" ]; then
             id=$(mutate POST bug "$(jq -n --arg s "$summary" \
               --arg d "$body" --arg w "$MARKER" \
@@ -313,12 +319,31 @@ jobs:
             echo "::error::Could not read the comments on bug $id"; exit 1
           elif grep -qF "$FINGERPRINT" <<< "$comments"; then
             echo "Bug $id already reports this set of failures."
+            exit 0
           else
-            # The failing set changed, so the summary is stale.
+            # The culprit may have changed, so the summary is stale.
             mutate PUT "bug/$id" "$(jq -n --arg s "$summary" --arg d "$body" \
               '{summary: $s, comment: {body: $d}}')" > /dev/null
             echo "::notice::Updated $show$id"
           fi
+
+          # The comment quotes an excerpt; attach the logs in full.
+          case "$id" in
+            "" | *[!0-9]*) echo "No bug to attach logs to"; exit 0 ;;
+          esac
+          for os in $(jq -r '.[] | select(.broken) | .os' all.json); do
+            log="verdicts/nss-head-$os/nss-head.log"
+            [ -f "$log" ] || continue
+            # Through files: one argv entry caps at 128k, and a big log exceeds it.
+            gzip -9c < "$log" | base64 -w0 | tr -d '\n' > attach.b64
+            jq -n --argjson ids "[$id]" --rawfile d attach.b64 \
+              --arg f "nss-head-$os-$FINGERPRINT.log.gz" \
+              '{ids: $ids, data: $d, file_name: $f, summary: $f,
+                content_type: "application/gzip", is_patch: false}' > attach.json
+            bz POST "bug/$id/attachment" -d @attach.json > /dev/null ||
+              { echo "::warning::Could not attach $log"; continue; }
+            echo "::notice::Attached $log"
+          done
 
       - name: Fail if any platform is broken
         if: env.BROKEN == 'true'
