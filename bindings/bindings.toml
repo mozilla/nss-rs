@@ -232,7 +232,7 @@ enums = [
     "PK11Origin",
     "SECOidTag",
 ]
-opaque = ["PK11ContextStr", "PK11SlotInfoStr", "SECAlgorithmIDStr", "SECKEYPublicKeyStr"]
+opaque = ["PK11ContextStr", "PK11SlotInfoStr", "SECAlgorithmIDStr"]
 variables = [
     "AES_BLOCK_SIZE",
     "PK11_ATTR_EXTRACTABLE",
