@@ -2,7 +2,7 @@ name: NSS head
 on:
   schedule:
     - cron: "17 5 * * *"
-  # So that changes to the watcher are exercised by the watcher itself.
+  # FIXME: Remove before merging; a PR can edit its way to the Bugzilla key.
   pull_request:
     paths:
       - .github/workflows/nss-head.yml
@@ -23,8 +23,6 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Supersede a pull request's earlier runs, but never interrupt a bisect that a
-  # schedule or a manual dispatch started.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -38,6 +36,7 @@ env:
   CARGO_TERM_COLOR: never
   RUST_BACKTRACE: 1
   NSS_REPO: https://github.com/mozilla/nss.git
+  NSPR_REPO: https://github.com/mozilla/nspr.git
 
 jobs:
   # Pinned once, so that every platform reports on the same revision.
@@ -46,13 +45,16 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       head: ${{ steps.head.outputs.sha }}
+      nspr: ${{ steps.head.outputs.nspr }}
     steps:
       - id: head
         run: |
-          sha=$(git ls-remote "$NSS_REPO" HEAD | cut -f1)
-          [ -n "$sha" ] || { echo "::error::Could not resolve HEAD of $NSS_REPO"; exit 1; }
-          echo "Testing NSS $sha"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          nss=$(git ls-remote "$NSS_REPO" HEAD | cut -f1)
+          nspr=$(git ls-remote "$NSPR_REPO" HEAD | cut -f1)
+          [ -n "$nss" ] && [ -n "$nspr" ] ||
+            { echo "::error::Could not resolve NSS or NSPR HEAD"; exit 1; }
+          echo "Testing NSS $nss with NSPR $nspr"
+          { echo "sha=$nss"; echo "nspr=$nspr"; } >> "$GITHUB_OUTPUT"
 
   head:
     name: NSS head on ${{ matrix.os }}
@@ -109,6 +111,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: mozilla/nspr
+          ref: ${{ needs.setup.outputs.nspr }}
           path: nspr
           persist-credentials: false
 
@@ -121,16 +124,20 @@ jobs:
 
       - name: Test NSS head
         run: |
-          if "$CHECK" 2>&1 | tee nss-head.log; then
+          status=0
+          "$CHECK" 2>&1 | tee nss-head.log || status=$?
+          if [ "$status" -eq 0 ]; then
             echo "BROKEN=false" >> "$GITHUB_ENV"
             echo "$HEAD_SHA" > .nss-last-good
           else
-            echo "::warning::nss-rs fails against NSS head $HEAD_SHA"
+            # 125 is the predicate's "NSS did not build": nothing to bisect for.
+            [ "$status" -ne 125 ] || echo "NO_BUILD=true" >> "$GITHUB_ENV"
+            echo "::warning::nss-rs fails against NSS head $HEAD_SHA (exit $status)"
             echo "BROKEN=true" >> "$GITHUB_ENV"
           fi
 
       - name: Bisect NSS
-        if: env.BROKEN == 'true'
+        if: env.BROKEN == 'true' && env.NO_BUILD != 'true'
         env:
           MIN_VERSION: ${{ steps.meta.outputs.min-version }}
           OVERRIDE: ${{ inputs.last-good }}
@@ -236,7 +243,6 @@ jobs:
               | sha256sum | cut -c1-12)"
           } >> "$GITHUB_ENV"
 
-      # Never file or close a real bug from a pull request, which has the secret.
       - name: Report to Bugzilla
         if: github.event_name != 'pull_request' && env.BUGZILLA_API_KEY != ''
         env:
@@ -245,8 +251,11 @@ jobs:
           bz() {
             local method=$1 path=$2
             shift 2
+            # Retry only reads: a retried POST can file the same bug twice.
+            local retry=()
+            [ "$method" != GET ] || retry=(--retry 3 --retry-all-errors)
             # No -L: curl keeps custom headers across a cross-host redirect.
-            curl -fsS -X "$method" "$BUGZILLA/$path" \
+            curl -fsS --max-time 60 "${retry[@]}" -X "$method" "$BUGZILLA/$path" \
               -H "X-BUGZILLA-API-KEY: $BUGZILLA_API_KEY" \
               -H "Content-Type: application/json" "$@"
           }
@@ -289,8 +298,9 @@ jobs:
           nss-rs-fingerprint: $FINGERPRINT
           EOF
           )
+          summary="nss-rs fails against NSS head on $failed"
           if [ -z "$id" ]; then
-            id=$(mutate POST bug "$(jq -n --arg s "nss-rs fails against NSS head on $failed" \
+            id=$(mutate POST bug "$(jq -n --arg s "$summary" \
               --arg d "$body" --arg w "$MARKER" \
               '{product: "NSS", component: "Libraries", version: "trunk", type: "defect",
                 summary: $s, description: $d, whiteboard: $w}')" | jq -r '.id')
@@ -298,7 +308,9 @@ jobs:
           elif bz GET "bug/$id/comment" | grep -qF "$FINGERPRINT"; then
             echo "Bug $id already reports this set of failures."
           else
-            mutate PUT "bug/$id" "$(jq -n --arg d "$body" '{comment: {body: $d}}')" > /dev/null
+            # The failing set changed, so the old summary no longer describes it.
+            mutate PUT "bug/$id" "$(jq -n --arg s "$summary" --arg d "$body" \
+              '{summary: $s, comment: {body: $d}}')" > /dev/null
             echo "::notice::Updated $show$id"
           fi
 
