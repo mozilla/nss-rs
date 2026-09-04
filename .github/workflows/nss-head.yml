@@ -12,6 +12,10 @@ on:
       last-good:
         description: "NSS commit to bisect from, overriding the cached one."
         default: ""
+      dry-run:
+        description: "Log the Bugzilla changes instead of making them."
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -204,6 +208,8 @@ jobs:
       # Never file or close a real bug from a pull request, which has the secret.
       - name: Report to Bugzilla
         if: github.event_name != 'pull_request' && env.BUGZILLA_API_KEY != ''
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           bz() {
             local method=$1 path=$2
@@ -211,6 +217,12 @@ jobs:
             curl -fsSL -X "$method" "$BUGZILLA/$path" \
               -H "X-BUGZILLA-API-KEY: $BUGZILLA_API_KEY" \
               -H "Content-Type: application/json" "$@"
+          }
+          # A dry run still searches and builds the payloads, but posts nothing.
+          mutate() { # method path payload
+            [ "$DRY_RUN" == "true" ] || { bz "$1" "$2" -d "$3"; return; }
+            { echo "dry-run: $1 $BUGZILLA/$2"; jq . <<< "$3"; } >&2
+            echo '{"id": "(dry-run)"}'
           }
           show="${BUGZILLA%/rest}/show_bug.cgi?id="
           id=$(bz GET bug -G \
@@ -222,7 +234,7 @@ jobs:
           if [ "$BROKEN" == "false" ]; then
             [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
             body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
-            bz PUT "bug/$id" -d "$(jq -n --arg c "$body" \
+            mutate PUT "bug/$id" "$(jq -n --arg c "$body" \
               '{status: "RESOLVED", resolution: "WORKSFORME", comment: {body: $c}}')" > /dev/null
             echo "::notice::Closed $show$id"
             exit 0
@@ -243,7 +255,7 @@ jobs:
           EOF
           )
           if [ -z "$id" ]; then
-            id=$(bz POST bug -d "$(jq -n --arg s "nss-rs fails against NSS head on $failed" \
+            id=$(mutate POST bug "$(jq -n --arg s "nss-rs fails against NSS head on $failed" \
               --arg d "$body" --arg w "$MARKER" \
               '{product: "NSS", component: "Libraries", version: "trunk", type: "defect",
                 summary: $s, description: $d, whiteboard: $w}')" | jq -r '.id')
@@ -251,7 +263,7 @@ jobs:
           elif bz GET "bug/$id/comment" | grep -qF "$FINGERPRINT"; then
             echo "Bug $id already reports this set of failures."
           else
-            bz PUT "bug/$id" -d "$(jq -n --arg d "$body" '{comment: {body: $d}}')" > /dev/null
+            mutate PUT "bug/$id" "$(jq -n --arg d "$body" '{comment: {body: $d}}')" > /dev/null
             echo "::notice::Updated $show$id"
           fi
 
