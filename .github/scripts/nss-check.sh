@@ -24,4 +24,5 @@ rm -rf "${NSS_DIR}/../dist" || exit 125
 cd "$NSS_RS_DIR" || exit 125
 # Nothing tells cargo that dist changed, so force the bindings to regenerate.
 cargo clean -p nss-rs || exit 125
-cargo test --locked
+cargo test --locked || exit $?
+cargo test --locked --features blapi
