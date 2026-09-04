@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use nss_rs::ec::{EcCurve, ecdh, ecdh_keygen};
+use nss_rs::{
+    ec::{EcCurve, ecdh, ecdh_keygen, export_ec_private_key_from_raw},
+    generate_ech_keys,
+};
 use test_fixture::fixture_init;
 
 #[test]
@@ -29,4 +32,23 @@ fn clone() {
     assert_eq!(a1_b, a2_b);
     assert_eq!(a1_b, b_a1);
     assert_eq!(a1_b, b_a2);
+}
+
+#[test]
+fn export_raw_extractable() {
+    fixture_init();
+
+    let kp = ecdh_keygen(&EcCurve::X25519).expect("ecdh_keygen");
+    let raw = export_ec_private_key_from_raw(&kp.private).expect("export");
+    assert!(!raw.is_empty());
+}
+
+#[test]
+fn export_raw_sensitive_reports_failure() {
+    fixture_init();
+
+    // ECH keys are generated sensitive, so CKA_VALUE cannot be read back. The
+    // export must surface that NSS failure rather than returning an empty key.
+    let (sk, _pk) = generate_ech_keys().expect("generate_ech_keys");
+    assert!(export_ec_private_key_from_raw(&sk).is_err());
 }

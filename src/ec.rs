@@ -220,9 +220,9 @@ pub fn import_ec_private_key_pkcs8(pki: &[u8]) -> Result<PrivateKey, Error> {
 pub fn export_ec_private_key_from_raw(key: &PrivateKey) -> Result<Vec<u8>, Error> {
     init()?;
     let mut key_item = SECItemMut::make_empty();
-    unsafe {
-        PK11_ReadRawAttribute(PK11_TypePrivKey, key.cast(), CKA_VALUE, key_item.as_mut());
-    }
+    secstatus_to_res(unsafe {
+        PK11_ReadRawAttribute(PK11_TypePrivKey, key.cast(), CKA_VALUE, key_item.as_mut())
+    })?;
     Ok(key_item.as_slice().to_owned())
 }
 
