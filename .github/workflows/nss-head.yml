@@ -1,0 +1,260 @@
+name: NSS head
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  # So that changes to the watcher are exercised by the watcher itself.
+  pull_request:
+    paths:
+      - .github/workflows/nss-head.yml
+      - .github/scripts/nss-check.sh
+  workflow_dispatch:
+    inputs:
+      last-good:
+        description: "NSS commit to bisect from, overriding the cached one."
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NSS_REPO: https://github.com/mozilla/nss.git
+
+jobs:
+  # Pinned once, so that every platform reports on the same revision.
+  setup:
+    name: Resolve NSS head
+    runs-on: ubuntu-24.04
+    outputs:
+      head: ${{ steps.head.outputs.sha }}
+    steps:
+      - id: head
+        run: |
+          sha=$(git ls-remote "$NSS_REPO" HEAD | cut -f1)
+          [ -n "$sha" ] || { echo "::error::Could not resolve HEAD of $NSS_REPO"; exit 1; }
+          echo "Testing NSS $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  head:
+    name: NSS head on ${{ matrix.os }}
+    needs: setup
+    strategy:
+      fail-fast: false # Every platform's verdict goes into one report.
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-15
+          - windows-2025
+          - ubuntu-22.04
+          - macos-14
+          - windows-2022
+    runs-on: ${{ matrix.os }}
+    # A bisect over a release's worth of NSS commits is ~7 from-scratch builds.
+    timeout-minutes: 330
+    env:
+      # NSS_DIR, NSS_PREBUILT and NSS_BUILD_FLAGS come from mozilla/actions/nss.
+      NSS_RS_DIR: ${{ github.workspace }}
+      HEAD_SHA: ${{ needs.setup.outputs.head }}
+      CACHE_KEY: nss-last-good-${{ matrix.os }}
+      # Absolute, because `git bisect run` invokes it from the NSS checkout.
+      CHECK: ${{ github.workspace }}/.github/scripts/nss-check.sh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: mozilla/actions/rust@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
+
+      - id: meta
+        uses: $/.github/actions/nss-metadata
+
+      # FIXME: Temporarily pinned to the head of mozilla/actions#140, which adds
+      # deps-only. Move back to a release tag once that has shipped.
+      - uses: mozilla/actions/nss@5b021bf9515beadc0e9456761485f8f94c0c31ed # mozilla/actions#140
+        with:
+          deps-only: true
+
+      # Full history for NSS, because bisect needs the range and the release tags.
+      - name: Check out NSS and NSPR
+        run: |
+          git clone --quiet "$NSS_REPO" "$NSS_DIR"
+          git -C "$NSS_DIR" checkout --quiet "$HEAD_SHA"
+          git clone --quiet --depth 1 https://github.com/mozilla/nspr.git nspr
+
+      - name: Restore last known-good NSS commit
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .nss-last-good
+          key: ${{ env.CACHE_KEY }}-${{ github.run_id }}
+          restore-keys: ${{ env.CACHE_KEY }}-
+
+      - name: Test NSS head
+        run: |
+          if "$CHECK" 2>&1 | tee nss-head.log; then
+            echo "BROKEN=false" >> "$GITHUB_ENV"
+            echo "$HEAD_SHA" > .nss-last-good
+          else
+            echo "::warning::nss-rs fails against NSS head $HEAD_SHA"
+            echo "BROKEN=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Bisect NSS
+        if: env.BROKEN == 'true'
+        env:
+          MIN_VERSION: ${{ steps.meta.outputs.min-version }}
+          OVERRIDE: ${{ inputs.last-good }}
+        run: |
+          last_good="${OVERRIDE:-$(cat .nss-last-good 2>/dev/null || true)}"
+          # Fall back to the release the crate declares as its floor, which also
+          # covers a cache miss or a last-good commit head no longer descends from.
+          if [ -z "$last_good" ] || ! git -C "$NSS_DIR" merge-base --is-ancestor "$last_good" "$HEAD_SHA"; then
+            last_good=$(git -C "$NSS_DIR" rev-parse "NSS_${MIN_VERSION//./_}_RTM^{commit}")
+            echo "Bisecting from the $MIN_VERSION tag at $last_good"
+          fi
+          git -C "$NSS_DIR" bisect start "$HEAD_SHA" "$last_good"
+          git -C "$NSS_DIR" bisect run "$CHECK" 2>&1 | tee bisect.log || true
+          first_bad=$(git -C "$NSS_DIR" rev-parse refs/bisect/bad 2>/dev/null || true)
+          git -C "$NSS_DIR" bisect reset
+          # Report the platform as failing anyway, rather than suppressing it.
+          [ -n "$first_bad" ] \
+            || echo "::warning::Bisect between $last_good and $HEAD_SHA identified no commit"
+          {
+            echo "FIRST_BAD=$first_bad"
+            echo "SUBJECT=$(git -C "$NSS_DIR" log -1 --format=%s "$first_bad" 2>/dev/null || true)"
+          } >> "$GITHUB_ENV"
+
+      # One file per platform, which the report job merges into a single verdict.
+      - name: Record the verdict
+        if: ${{ !cancelled() && env.BROKEN != '' }}
+        env:
+          OS: ${{ matrix.os }}
+        run: |
+          jq -n --arg os "$OS" --arg broken "$BROKEN" \
+            --arg first_bad "${FIRST_BAD:-}" --arg subject "${SUBJECT:-}" \
+            --rawfile log nss-head.log \
+            '{os: $os, broken: ($broken == "true"),
+              first_bad: $first_bad, subject: $subject, log: $log[-4000:]}' > verdict.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: nss-head-${{ matrix.os }}
+          path: |
+            verdict.json
+            nss-head.log
+            bisect.log
+          if-no-files-found: ignore
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.BROKEN == 'false'
+        with:
+          path: .nss-last-good
+          key: ${{ env.CACHE_KEY }}-${{ github.run_id }}
+
+      # Last, so that the verdict is recorded and uploaded either way.
+      - name: Fail this platform
+        if: env.BROKEN == 'true'
+        run: exit 1
+
+  report:
+    name: Report to Bugzilla
+    needs: [setup, head]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    env:
+      BUGZILLA: https://bugzilla.mozilla.org/rest
+      # Identifies the bug this workflow owns, so it can update and close it.
+      MARKER: "[nss-rs-head]"
+      BUGZILLA_API_KEY: ${{ secrets.BUGZILLA_API_KEY }} # zizmor: ignore[secrets-outside-env]
+      HEAD_SHA: ${{ needs.setup.outputs.head }}
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: nss-head-*
+          path: verdicts
+
+      - name: Summarise the verdicts
+        run: |
+          shopt -s nullglob
+          verdicts=(verdicts/*/verdict.json)
+          [ ${#verdicts[@]} -gt 0 ] || { echo "::error::No platform reported a verdict"; exit 1; }
+          jq -s 'sort_by(.os)' "${verdicts[@]}" > all.json
+          jq -r '.[] | "\(if .broken then "FAIL" else "ok" end)\t\(.os)\t\(.first_bad)"' all.json
+          {
+            echo "BROKEN=$(jq -r 'any(.broken) | tostring' all.json)"
+            # Changes whenever the set of failing platforms or their commits does.
+            echo "FINGERPRINT=$(jq -cS 'map(select(.broken) | {os, first_bad})' all.json \
+              | sha256sum | cut -c1-12)"
+          } >> "$GITHUB_ENV"
+
+      # Never file or close a real bug from a pull request, which has the secret.
+      - name: Report to Bugzilla
+        if: github.event_name != 'pull_request' && env.BUGZILLA_API_KEY != ''
+        run: |
+          bz() {
+            local method=$1 path=$2
+            shift 2
+            curl -fsSL -X "$method" "$BUGZILLA/$path" \
+              -H "X-BUGZILLA-API-KEY: $BUGZILLA_API_KEY" \
+              -H "Content-Type: application/json" "$@"
+          }
+          show="${BUGZILLA%/rest}/show_bug.cgi?id="
+          id=$(bz GET bug -G \
+            --data-urlencode "product=NSS" \
+            --data-urlencode "whiteboard=$MARKER" \
+            --data-urlencode "resolution=---" \
+            --data-urlencode "include_fields=id" | jq -r '.bugs[0].id // ""')
+
+          if [ "$BROKEN" == "false" ]; then
+            [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
+            body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
+            bz PUT "bug/$id" -d "$(jq -n --arg c "$body" \
+              '{status: "RESOLVED", resolution: "WORKSFORME", comment: {body: $c}}')" > /dev/null
+            echo "::notice::Closed $show$id"
+            exit 0
+          fi
+
+          failed=$(jq -r '[.[] | select(.broken) | .os] | join(", ")' all.json)
+          detail=$(jq -r '.[] | select(.broken) |
+            "## \(.os)\n\nFirst bad commit: \(if .first_bad == "" then "bisect inconclusive"
+              else "\(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(.log)\n```\n"' all.json)
+          body=$(cat <<EOF
+          Building and testing nss-rs (https://github.com/mozilla/nss-rs) against NSS
+          head $HEAD_SHA fails on: $failed
+
+          $detail
+
+          Reported automatically by $RUN
+          nss-rs-fingerprint: $FINGERPRINT
+          EOF
+          )
+          if [ -z "$id" ]; then
+            id=$(bz POST bug -d "$(jq -n --arg s "nss-rs fails against NSS head on $failed" \
+              --arg d "$body" --arg w "$MARKER" \
+              '{product: "NSS", component: "Libraries", version: "trunk", type: "defect",
+                summary: $s, description: $d, whiteboard: $w}')" | jq -r '.id')
+            echo "::notice::Filed $show$id"
+          elif bz GET "bug/$id/comment" | grep -qF "$FINGERPRINT"; then
+            echo "Bug $id already reports this set of failures."
+          else
+            bz PUT "bug/$id" -d "$(jq -n --arg d "$body" '{comment: {body: $d}}')" > /dev/null
+            echo "::notice::Updated $show$id"
+          fi
+
+      - name: Fail if any platform is broken
+        if: env.BROKEN == 'true'
+        run: exit 1
