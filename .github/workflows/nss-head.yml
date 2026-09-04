@@ -92,9 +92,7 @@ jobs:
       - id: meta
         uses: $/.github/actions/nss-metadata
 
-      # FIXME: Temporarily pinned to the head of mozilla/actions#140, which adds
-      # deps-only. Move back to a release tag once that has shipped.
-      - uses: mozilla/actions/nss@5b021bf9515beadc0e9456761485f8f94c0c31ed # mozilla/actions#140
+      - uses: mozilla/actions/nss@47d5a4be3c5b5a3fc45476739dc22b0ba9ca749f # v2.0.7
         with:
           deps-only: true
 
