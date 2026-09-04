@@ -21,11 +21,13 @@ use crate::{
     ssl::{SSLSecretCallback, SSLSecretDirection},
 };
 
-experimental_api!(SSL_SecretCallback(
-    fd: *mut PRFileDesc,
-    cb: SSLSecretCallback,
-    arg: *mut c_void,
-));
+experimental_api! {
+    SSL_SecretCallback(
+        fd: *mut PRFileDesc,
+        cb: SSLSecretCallback,
+        arg: *mut c_void,
+    )
+}
 
 #[derive(Clone, Copy, Debug, FromRepr)]
 // Use i32 for Windows MSVC, unless it is MinGW (see

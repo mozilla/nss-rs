@@ -28,11 +28,13 @@ use crate::{
 
 include!(concat!(env!("OUT_DIR"), "/nspr_time.rs"));
 
-experimental_api!(SSL_SetTimeFunc(
-    fd: *mut PRFileDesc,
-    cb: SSLTimeFunc,
-    arg: *mut c_void,
-));
+experimental_api! {
+    SSL_SetTimeFunc(
+        fd: *mut PRFileDesc,
+        cb: SSLTimeFunc,
+        arg: *mut c_void,
+    )
+}
 
 /// This struct holds the zero time used for converting between `Instant` and `PRTime`.
 #[derive(Debug)]
