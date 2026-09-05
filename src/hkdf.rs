@@ -28,23 +28,25 @@ use crate::{
     },
 };
 
-experimental_api!(SSL_HkdfExtract(
-    version: Version,
-    cipher: Cipher,
-    salt: *mut PK11SymKey,
-    ikm: *mut PK11SymKey,
-    prk: *mut *mut PK11SymKey,
-));
-experimental_api!(SSL_HkdfExpandLabel(
-    version: Version,
-    cipher: Cipher,
-    prk: *mut PK11SymKey,
-    handshake_hash: *const u8,
-    handshake_hash_len: c_uint,
-    label: *const c_char,
-    label_len: c_uint,
-    secret: *mut *mut PK11SymKey,
-));
+experimental_api! {
+    SSL_HkdfExtract(
+        version: Version,
+        cipher: Cipher,
+        salt: *mut PK11SymKey,
+        ikm: *mut PK11SymKey,
+        prk: *mut *mut PK11SymKey,
+    );
+    SSL_HkdfExpandLabel(
+        version: Version,
+        cipher: Cipher,
+        prk: *mut PK11SymKey,
+        handshake_hash: *const u8,
+        handshake_hash_len: c_uint,
+        label: *const c_char,
+        label_len: c_uint,
+        secret: *mut *mut PK11SymKey,
+    );
+}
 
 #[derive(Clone, Copy, Debug)]
 

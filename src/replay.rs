@@ -17,18 +17,20 @@ use crate::{
     time::{Interval, PRTime, Time},
 };
 
-experimental_api!(SSL_CreateAntiReplayContext(
-    now: PRTime,
-    window: PRTime,
-    k: c_uint,
-    bits: c_uint,
-    ctx: *mut *mut SSLAntiReplayContext,
-));
-experimental_api!(SSL_ReleaseAntiReplayContext(ctx: *mut SSLAntiReplayContext));
-experimental_api!(SSL_SetAntiReplayContext(
-    fd: *mut PRFileDesc,
-    ctx: *mut SSLAntiReplayContext,
-));
+experimental_api! {
+    SSL_CreateAntiReplayContext(
+        now: PRTime,
+        window: PRTime,
+        k: c_uint,
+        bits: c_uint,
+        ctx: *mut *mut SSLAntiReplayContext,
+    );
+    SSL_ReleaseAntiReplayContext(ctx: *mut SSLAntiReplayContext);
+    SSL_SetAntiReplayContext(
+        fd: *mut PRFileDesc,
+        ctx: *mut SSLAntiReplayContext,
+    );
+}
 
 scoped_ptr!(
     AntiReplayContext,

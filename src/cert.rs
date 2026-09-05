@@ -15,10 +15,12 @@ use crate::{
     ssl::{SSL_PeerSignedCertTimestamps, SSL_PeerStapledOCSPResponses},
 };
 
-experimental_api!(SSL_PeerCertificateChainDER(
-    fd: *mut PRFileDesc,
-    out: *mut *mut SECItemArray,
-));
+experimental_api! {
+    SSL_PeerCertificateChainDER(
+        fd: *mut PRFileDesc,
+        out: *mut *mut SECItemArray,
+    );
+}
 
 pub struct CertificateInfo {
     certs: ScopedSECItemArray,

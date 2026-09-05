@@ -29,42 +29,40 @@ pub use crate::{
     ssl::HpkeSymmetricSuite as SymmetricSuite,
 };
 
-experimental_api!(SSL_EnableTls13GreaseEch(
-    fd: *mut PRFileDesc,
-    enabled: PRBool,
-));
-
-experimental_api!(SSL_GetEchRetryConfigs(
-    fd: *mut PRFileDesc,
-    config: *mut SECItem,
-));
-
-experimental_api!(SSL_SetClientEchConfigs(
-    fd: *mut PRFileDesc,
-    config_list: *const u8,
-    config_list_len: c_uint,
-));
-
-experimental_api!(SSL_SetServerEchConfigs(
-    fd: *mut PRFileDesc,
-    pk: *const SECKEYPublicKey,
-    sk: *const SECKEYPrivateKey,
-    record: *const u8,
-    record_len: c_uint,
-));
-
-experimental_api!(SSL_EncodeEchConfigId(
-    config_id: u8,
-    public_name: *const c_char,
-    max_name_len: c_uint,
-    kem_id: KemId::Type,
-    pk: *const SECKEYPublicKey,
-    hpke_suites: *const SymmetricSuite,
-    hpke_suite_count: c_uint,
-    out: *mut u8,
-    out_len: *mut c_uint,
-    max_len: c_uint,
-));
+experimental_api! {
+    SSL_EnableTls13GreaseEch(
+        fd: *mut PRFileDesc,
+        enabled: PRBool,
+    );
+    SSL_GetEchRetryConfigs(
+        fd: *mut PRFileDesc,
+        config: *mut SECItem,
+    );
+    SSL_SetClientEchConfigs(
+        fd: *mut PRFileDesc,
+        config_list: *const u8,
+        config_list_len: c_uint,
+    );
+    SSL_SetServerEchConfigs(
+        fd: *mut PRFileDesc,
+        pk: *const SECKEYPublicKey,
+        sk: *const SECKEYPrivateKey,
+        record: *const u8,
+        record_len: c_uint,
+    );
+    SSL_EncodeEchConfigId(
+        config_id: u8,
+        public_name: *const c_char,
+        max_name_len: c_uint,
+        kem_id: KemId::Type,
+        pk: *const SECKEYPublicKey,
+        hpke_suites: *const SymmetricSuite,
+        hpke_suite_count: c_uint,
+        out: *mut u8,
+        out_len: *mut c_uint,
+        max_len: c_uint,
+    );
+}
 
 /// Convert any result that contains an ECH error into a result with an `EchRetry`.
 pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
