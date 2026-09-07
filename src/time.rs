@@ -14,10 +14,9 @@ use std::{
     ops::Deref,
     os::raw::c_void,
     pin::Pin,
+    sync::OnceLock,
     time::{Duration, Instant},
 };
-
-use once_cell::sync::OnceCell;
 
 use crate::{
     agent::as_c_void,
@@ -77,7 +76,7 @@ impl TimeZero {
     }
 }
 
-static BASE_TIME: OnceCell<TimeZero> = OnceCell::new();
+static BASE_TIME: OnceLock<TimeZero> = OnceLock::new();
 
 fn get_base() -> &'static TimeZero {
     BASE_TIME.get_or_init(|| TimeZero {
