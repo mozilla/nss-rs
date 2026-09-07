@@ -271,8 +271,11 @@ jobs:
             --data-urlencode "whiteboard=$MARKER" \
             --data-urlencode "order=bug_id" \
             --data-urlencode "include_fields=id,is_open")
-          id=$(jq -r '[.bugs[] | select(.is_open) | .id] | first // ""' <<< "$bugs")
-          closed=$(jq -r '[.bugs[] | select(.is_open | not) | .id] | last // ""' <<< "$bugs")
+          # The marker means this workflow owns the bug, and it drops the marker
+          # when closing its own. So a marker bug that is closed was closed by hand.
+          newest=$(jq -c '.bugs | sort_by(.id) | last // {}' <<< "$bugs")
+          id=$(jq -r 'if .is_open then .id else "" end' <<< "$newest")
+          closed=$(jq -r 'if .is_open == false then .id else "" end' <<< "$newest")
 
           if [ "$BROKEN" == "false" ]; then
             # A timed-out platform uploads no verdict, so the rest look green.
@@ -281,7 +284,8 @@ jobs:
             [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
             body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
             mutate PUT "bug/$id" "$(jq -n --arg c "$body" \
-              '{status: "RESOLVED", resolution: "WORKSFORME", comment: {body: $c}}')" > /dev/null
+              '{status: "RESOLVED", resolution: "WORKSFORME", whiteboard: "",
+                comment: {body: $c}}')" > /dev/null
             echo "::notice::Closed $show$id"
             exit 0
           fi
