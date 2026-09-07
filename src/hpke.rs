@@ -6,7 +6,6 @@
 
 use std::{
     convert::TryFrom,
-    ops::Deref,
     os::raw::c_uint,
     ptr::{addr_of_mut, null, null_mut},
 };
@@ -25,7 +24,7 @@ pub enum KemAlgorithm {
 }
 
 /// Configuration for `Hpke`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, derive_more::Constructor)]
 pub struct Config {
     kem: KemAlgorithm,
     kdf: HkdfAlgorithm,
@@ -33,10 +32,6 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(kem: KemAlgorithm, kdf: HkdfAlgorithm, aead: AeadAlgorithms) -> Self {
-        Self { kem, kdf, aead }
-    }
-
     pub fn kem(self) -> KemAlgorithm {
         self.kem
     }
@@ -117,8 +112,10 @@ impl Exporter for HpkeContext {
 }
 
 #[allow(clippy::module_name_repetitions)]
+#[derive(derive_more::Deref)]
 pub struct HpkeS {
     context: HpkeContext,
+    #[deref]
     config: Config,
 }
 
@@ -164,16 +161,11 @@ impl Exporter for HpkeS {
     }
 }
 
-impl Deref for HpkeS {
-    type Target = Config;
-    fn deref(&self) -> &Self::Target {
-        &self.config
-    }
-}
-
 #[allow(clippy::module_name_repetitions)]
+#[derive(derive_more::Deref)]
 pub struct HpkeR {
     context: HpkeContext,
+    #[deref]
     config: Config,
 }
 
@@ -235,13 +227,6 @@ impl HpkeR {
 impl Exporter for HpkeR {
     fn export(&self, info: &[u8], len: usize) -> Res<SymKey> {
         self.context.export(info, len)
-    }
-}
-
-impl Deref for HpkeR {
-    type Target = Config;
-    fn deref(&self) -> &Self::Target {
-        &self.config
     }
 }
 
