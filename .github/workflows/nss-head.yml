@@ -174,7 +174,7 @@ jobs:
         env:
           OS: ${{ matrix.os }}
         run: |
-          # Cap loosely: the report quotes at most 10000 and attaches the full log.
+          # Loose cap: the report quotes at most 10000 anyway.
           jq -n --arg os "$OS" --arg broken "$BROKEN" \
             --arg no_build "${NO_BUILD:-false}" --arg self_broken "${SELF_BROKEN:-false}" \
             --arg first_bad "${FIRST_BAD:-}" --arg subject "${SUBJECT:-}" \
@@ -219,7 +219,7 @@ jobs:
       BUGZILLA: ${{ inputs.test-bugzilla && 'https://bugzilla-dev.allizom.org/rest' || 'https://bugzilla.mozilla.org/rest' }}
       # Identifies the bug this workflow owns, so it can update and close it.
       MARKER: "[nss-rs-head]"
-      # Added when it closes that bug itself, which a closure by hand lacks.
+      # Added when this workflow closes that bug itself.
       FIXED: "[nss-rs-head-fixed]"
       # A missing test key must not fall through to the production one.
       BUGZILLA_API_KEY: ${{ inputs.test-bugzilla && secrets.BUGZILLA_TEST_API_KEY || (!inputs.test-bugzilla && secrets.BUGZILLA_API_KEY) || '' }} # zizmor: ignore[secrets-outside-env]
@@ -283,27 +283,29 @@ jobs:
           id=$(jq -r '.id // ""' <<< "$ours")
           closed=$(jq -r --arg f "$FIXED" '[.bugs[] | select(.is_open | not)
             | select((.whiteboard // "") | index($f) == null) | .id] | max // ""' <<< "$bugs")
+          # Our token on an open bug: we closed it and triage disagreed.
+          reopened=$(jq -r --arg f "$FIXED" \
+            'if ((.whiteboard // "") | index($f)) then "true" else "false" end' <<< "$ours")
 
           if [ "$BROKEN" == "false" ]; then
             # A timed-out platform uploads no verdict, so the rest look green.
             [ "$HEAD_RESULT" == "success" ] ||
               { echo "::warning::Not every platform reported; leaving bug $id alone"; exit 0; }
             [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
+            [ "$reopened" != "true" ] ||
+              { echo "::notice::$show$id was reopened after we closed it; leaving it open"; exit 0; }
             body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
-            # Tag rather than untag: a bug someone reopens has to stay findable.
             jq -n --arg c "$body" --arg f "$FIXED" --argjson b "$ours" \
               '{status: "RESOLVED", resolution: "WORKSFORME",
-                whiteboard: ($b.whiteboard // ""
-                  | if index($f) then . else . + " " + $f end | gsub("^\\s+|\\s+$"; "")),
+                whiteboard: ((($b.whiteboard // "") + " " + $f) | gsub("^\\s+|\\s+$"; "")),
                 comment: {body: $c}}' > payload.json
             mutate PUT "bug/$id" payload.json > /dev/null
             echo "::notice::Closed $show$id"
             exit 0
           fi
 
-          # Our token is stale once the bug is open again, and a later closure by
-          # hand would read as ours. Untag before any branch that stops early.
-          if [ -n "$id" ] && jq -e --arg f "$FIXED" '(.whiteboard // "") | index($f)' <<< "$ours" > /dev/null; then
+          # Untag before any early exit, or a later closure by hand reads as ours.
+          if [ "$reopened" == "true" ]; then
             jq -n --arg f "$FIXED" --argjson b "$ours" \
               '{whiteboard: ($b.whiteboard // "" | split($f) | join(" ")
                 | gsub("\\s+"; " ") | gsub("^\\s+|\\s+$"; ""))}' > payload.json
@@ -342,6 +344,8 @@ jobs:
           culprit=$(jq -r 'map(.first_bad) | unique
             | if length == 1 and .[0] != "" then "; first bad commit \(.[0][0:12])" else "" end' broken.json)
           summary="nss-rs fails against NSS head$culprit"
+          # With no single culprit, name the platforms rather than nothing.
+          [ -n "$culprit" ] || summary="nss-rs fails against NSS head on $failed"
           if [ -z "$id" ]; then
             jq -n --arg s "$summary" --arg d "$body" --arg w "$MARKER" \
               '{product: "NSS", component: "Libraries", version: "trunk", type: "defect",
