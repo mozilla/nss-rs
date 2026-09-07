@@ -181,7 +181,8 @@ jobs:
             '{os: $os, broken: ($broken == "true"), no_build: ($no_build == "true"),
               self_broken: ($self_broken == "true"),
               first_bad: $first_bad, subject: $subject,
-              log: ($log | split("\n") | (map(test("error:|panicked at|^failures:")) | index(true) // 0) as $i
+              log: ($log | split("\n")
+                | (map(test("error(\\[[^]]*\\])?:|error [A-Z]+[0-9]+:|panicked at|^failures:")) | index(true) // 0) as $i
                 | .[$i:] | join("\n"))}' > verdict.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -274,9 +275,9 @@ jobs:
             --data-urlencode "whiteboard=$MARKER" \
             --data-urlencode "include_fields=id,is_open,whiteboard")
           # A closed marker bug was closed by hand; we clear ours.
-          newest=$(jq -c '.bugs | max_by(.id) // {}' <<< "$bugs")
-          id=$(jq -r 'if .is_open then .id else "" end' <<< "$newest")
-          closed=$(jq -r 'if .is_open == false then .id else "" end' <<< "$newest")
+          ours=$(jq -c '[.bugs[] | select(.is_open)] | max_by(.id) // {}' <<< "$bugs")
+          id=$(jq -r '.id // ""' <<< "$ours")
+          closed=$(jq -r '[.bugs[] | select(.is_open | not) | .id] | max // ""' <<< "$bugs")
 
           if [ "$BROKEN" == "false" ]; then
             # A timed-out platform uploads no verdict, so the rest look green.
@@ -285,9 +286,10 @@ jobs:
             [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
             body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
             # Others annotate the whiteboard too, so drop only ours.
-            jq -n --arg c "$body" --arg m "$MARKER" --argjson b "$newest" \
+            jq -n --arg c "$body" --arg m "$MARKER" --argjson b "$ours" \
               '{status: "RESOLVED", resolution: "WORKSFORME",
-                whiteboard: ($b.whiteboard // "" | split($m) | join("") | gsub("^\\s+|\\s+$"; "")),
+                whiteboard: ($b.whiteboard // "" | split($m) | join(" ")
+                  | gsub("\\s+"; " ") | gsub("^\\s+|\\s+$"; "")),
                 comment: {body: $c}}' > payload.json
             mutate PUT "bug/$id" payload.json > /dev/null
             echo "::notice::Closed $show$id"
