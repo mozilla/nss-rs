@@ -174,6 +174,7 @@ jobs:
         env:
           OS: ${{ matrix.os }}
         run: |
+          # Cap loosely: the report quotes at most 10000 and attaches the full log.
           jq -n --arg os "$OS" --arg broken "$BROKEN" \
             --arg no_build "${NO_BUILD:-false}" --arg self_broken "${SELF_BROKEN:-false}" \
             --arg first_bad "${FIRST_BAD:-}" --arg subject "${SUBJECT:-}" \
@@ -183,7 +184,7 @@ jobs:
               first_bad: $first_bad, subject: $subject,
               log: ($log | split("\n")
                 | (map(test("error(\\[[^]]*\\])?:|error [A-Z]+[0-9]+:|panicked at|^failures:")) | index(true) // 0) as $i
-                | .[$i:] | join("\n"))}' > verdict.json
+                | .[$i:] | join("\n") | .[:20000])}' > verdict.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
@@ -218,6 +219,8 @@ jobs:
       BUGZILLA: ${{ inputs.test-bugzilla && 'https://bugzilla-dev.allizom.org/rest' || 'https://bugzilla.mozilla.org/rest' }}
       # Identifies the bug this workflow owns, so it can update and close it.
       MARKER: "[nss-rs-head]"
+      # Added when it closes that bug itself, which a closure by hand lacks.
+      FIXED: "[nss-rs-head-fixed]"
       # A missing test key must not fall through to the production one.
       BUGZILLA_API_KEY: ${{ inputs.test-bugzilla && secrets.BUGZILLA_TEST_API_KEY || (!inputs.test-bugzilla && secrets.BUGZILLA_API_KEY) || '' }} # zizmor: ignore[secrets-outside-env]
       HEAD_SHA: ${{ needs.setup.outputs.head }}
@@ -268,16 +271,18 @@ jobs:
             { echo "dry-run: $1 $BUGZILLA/$2"
               jq 'walk(if type == "string" and length > 65535 then "\(length) chars" else . end)' "$3"
             } >&2
-            echo '{"id": "(dry-run)"}'
+            # Numeric, so the attachment payloads are still built and previewed.
+            echo '{"id": 0}'
           }
           show="${BUGZILLA%/rest}/show_bug.cgi?id="
           bugs=$(bz GET bug -G \
             --data-urlencode "whiteboard=$MARKER" \
             --data-urlencode "include_fields=id,is_open,whiteboard")
-          # A closed marker bug was closed by hand; we clear ours.
+          # An open bug always wins; a closed one without $FIXED was closed by hand.
           ours=$(jq -c '[.bugs[] | select(.is_open)] | max_by(.id) // {}' <<< "$bugs")
           id=$(jq -r '.id // ""' <<< "$ours")
-          closed=$(jq -r '[.bugs[] | select(.is_open | not) | .id] | max // ""' <<< "$bugs")
+          closed=$(jq -r --arg f "$FIXED" '[.bugs[] | select(.is_open | not)
+            | select((.whiteboard // "") | index($f) == null) | .id] | max // ""' <<< "$bugs")
 
           if [ "$BROKEN" == "false" ]; then
             # A timed-out platform uploads no verdict, so the rest look green.
@@ -285,11 +290,11 @@ jobs:
               { echo "::warning::Not every platform reported; leaving bug $id alone"; exit 0; }
             [ -n "$id" ] || { echo "NSS head is fine and no bug is open."; exit 0; }
             body="nss-rs builds and tests cleanly against NSS head $HEAD_SHA on every platform, so this is fixed. Closed automatically by $RUN."
-            # Others annotate the whiteboard too, so drop only ours.
-            jq -n --arg c "$body" --arg m "$MARKER" --argjson b "$ours" \
+            # Tag rather than untag: a bug someone reopens has to stay findable.
+            jq -n --arg c "$body" --arg f "$FIXED" --argjson b "$ours" \
               '{status: "RESOLVED", resolution: "WORKSFORME",
-                whiteboard: ($b.whiteboard // "" | split($m) | join(" ")
-                  | gsub("\\s+"; " ") | gsub("^\\s+|\\s+$"; "")),
+                whiteboard: ($b.whiteboard // ""
+                  | if index($f) then . else . + " " + $f end | gsub("^\\s+|\\s+$"; "")),
                 comment: {body: $c}}' > payload.json
             mutate PUT "bug/$id" payload.json > /dev/null
             echo "::notice::Closed $show$id"
