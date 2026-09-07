@@ -301,6 +301,16 @@ jobs:
             exit 0
           fi
 
+          # Our token is stale once the bug is open again, and a later closure by
+          # hand would read as ours. Untag before any branch that stops early.
+          if [ -n "$id" ] && jq -e --arg f "$FIXED" '(.whiteboard // "") | index($f)' <<< "$ours" > /dev/null; then
+            jq -n --arg f "$FIXED" --argjson b "$ours" \
+              '{whiteboard: ($b.whiteboard // "" | split($f) | join(" ")
+                | gsub("\\s+"; " ") | gsub("^\\s+|\\s+$"; ""))}' > payload.json
+            mutate PUT "bug/$id" payload.json > /dev/null
+            echo "::notice::Reopened, so dropped $FIXED from $show$id"
+          fi
+
           # Closing the bug is a decision to stop hearing about this.
           if [ -z "$id" ] && [ -n "$closed" ]; then
             echo "::notice::Bug $show$closed was closed by hand; not filing another. Remove $MARKER from its whiteboard to re-enable reporting."
@@ -325,7 +335,7 @@ jobs:
 
           $detail
 
-          Reported automatically by $RUN
+          Reported automatically by $RUN; remove $MARKER from the whiteboard to stop these reports.
           nss-rs-fingerprint: $FINGERPRINT
           EOF
           )
