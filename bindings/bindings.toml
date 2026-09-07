@@ -132,6 +132,7 @@ variables = ["NSS_INIT_READONLY", "SECMOD_DB"]
 types = [
     "CERTCertificateStr",
     "CK_BBOOL",
+    "CK_GCM_MESSAGE_PARAMS",
     # "CK_ULONG", // Uncommenting this breaks nss_ssl bindings
     "CK_HKDF_PARAMS",
     "CERTCertList",
