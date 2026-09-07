@@ -267,11 +267,12 @@ jobs:
             echo '{"id": "(dry-run)"}'
           }
           show="${BUGZILLA%/rest}/show_bug.cgi?id="
-          id=$(bz GET bug -G \
+          bugs=$(bz GET bug -G \
             --data-urlencode "whiteboard=$MARKER" \
-            --data-urlencode "resolution=---" \
             --data-urlencode "order=bug_id" \
-            --data-urlencode "include_fields=id" | jq -r '.bugs[0].id // ""')
+            --data-urlencode "include_fields=id,is_open")
+          id=$(jq -r '[.bugs[] | select(.is_open) | .id] | first // ""' <<< "$bugs")
+          closed=$(jq -r '[.bugs[] | select(.is_open | not) | .id] | last // ""' <<< "$bugs")
 
           if [ "$BROKEN" == "false" ]; then
             # A timed-out platform uploads no verdict, so the rest look green.
@@ -292,7 +293,7 @@ jobs:
             "## \(.os)\n\n\(if .no_build then "NSS head does not build."
               elif .self_broken then "nss-rs also fails at the last known-good revision, so this may not be an NSS regression."
               elif .first_bad == "" then "First bad commit: bisect inconclusive"
-              else "First bad commit: \(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(.log[:$n])\n```\n"' all.json)
+              else "First bad commit: \(.first_bad) \(.subject)\n  https://github.com/mozilla/nss/commit/\(.first_bad)" end)\n\n```\n\(if (.log | length) > $n then .log[:$n] | sub("\n[^\n]*$"; "") else .log end)\n```\n"' all.json)
           body=$(cat <<EOF
           Building and testing nss-rs (https://github.com/mozilla/nss-rs) against NSS head $HEAD_SHA fails on: $failed
 
@@ -302,6 +303,12 @@ jobs:
           nss-rs-fingerprint: $FINGERPRINT
           EOF
           )
+          # Closing the bug is a decision to stop hearing about this, so respect
+          # it rather than reopening or filing alongside.
+          if [ -z "$id" ] && [ -n "$closed" ]; then
+            echo "::notice::Bug $closed is closed; not filing another"
+            exit 0
+          fi
           if [ "$NO_BUILD" == "true" ]; then
             echo "::warning::NSS head does not build on $failed; not filing"
             exit 0
@@ -327,7 +334,9 @@ jobs:
             echo "::notice::Updated $show$id"
           fi
 
-          # The comment quotes an excerpt; attach the logs in full.
+          # The comment quotes an excerpt; attach the logs in full. This calls bz
+          # directly, so a dry run has to stop here itself.
+          [ "$DRY_RUN" != "true" ] || { echo "dry-run: not attaching logs"; exit 0; }
           case "$id" in
             "" | *[!0-9]*) echo "No bug to attach logs to"; exit 0 ;;
           esac
@@ -335,7 +344,7 @@ jobs:
             log="verdicts/nss-head-$os/nss-head.log"
             [ -f "$log" ] || continue
             # Through files: one argv entry caps at 128k, and a big log exceeds it.
-            gzip -9c < "$log" | base64 -w0 | tr -d '\n' > attach.b64
+            gzip -9c < "$log" | base64 -w0 > attach.b64
             jq -n --argjson ids "[$id]" --rawfile d attach.b64 \
               --arg f "nss-head-$os-$FINGERPRINT.log.gz" \
               '{ids: $ids, data: $d, file_name: $f, summary: $f,
