@@ -83,7 +83,7 @@ runs:
           if [ -n "$BINDGEN_ARGS" ]; then
             # Solaris doesn't have a system package for bindgen
             # renovate: depName=bindgen-cli datasource=crate
-            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli@0.72.1 --locked
+            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli@0.73.0 --locked
             echo "$BINDGEN_ARGS" | xargs bindgen src/bindings/bsd.h > "$PLATFORM.rs"
             # Compare generated bindings with committed bindings.
             # If different, exit early — there's no point compiling with stale
