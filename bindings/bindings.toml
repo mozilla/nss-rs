@@ -135,6 +135,7 @@ types = [
     "CK_GCM_MESSAGE_PARAMS",
     # "CK_ULONG", // Uncommenting this breaks nss_ssl bindings
     "CK_HKDF_PARAMS",
+    "CK_RSA_PKCS_OAEP_PARAMS",
     "CERTCertList",
     "CERTCertListNode",
     "CK_CHACHA20_PARAMS",
@@ -146,10 +147,13 @@ types = [
     "PK11SlotListElementStr",
     "PK11SymKeyStr",
     "SECKEYPrivateKeyStr",
+    "SECMODModule",
+    "SECMODModuleStr",
 ]
 functions = [
     "CERT_DestroyCertificate",
     "CERT_DestroyCertList",
+    "CERT_ExtractPublicKey",
     "CERT_GetCertificateDer",
     "NSS_SetAlgorithmPolicy",
     "PK11_AEADOp",
@@ -167,6 +171,7 @@ functions = [
     "PK11_ExtractKeyValue",
     "PK11_FindCertFromNickname",
     "PK11_FindKeyByAnyCert",
+    "PK11_FindPrivateKeyFromCert",
     "PK11_FreeSlot",
     "PK11_FreeSlotList",
     "PK11_FreeSymKey",
@@ -203,7 +208,9 @@ functions = [
     "PK11_ListFixedKeysInSlot",
     "PK11_Logout",
     "PK11_PBEKeyGen",
+    "PK11_PrivDecrypt",
     "PK11_PubDeriveWithKDF",
+    "PK11_PubEncrypt",
     "PK11_ReadRawAttribute",
     "PK11_ReferenceSlot",
     "PK11_ReferenceSymKey",
@@ -222,6 +229,9 @@ functions = [
     "SECKEY_DestroySubjectPublicKeyInfo",
     "SECKEY_ExtractPublicKey",
     "SECKEY_ConvertToPublicKey",
+    "SECMOD_DestroyModule",
+    "SECMOD_LoadUserModule",
+    "SECMOD_UnloadUserModule",
     "SECOID_DestroyAlgorithmID",
     "SECOID_FindOIDByTag",
 ]
@@ -288,6 +298,9 @@ variables = [
     "CKM_AES_KEY_GEN",
     "CKM_ECDSA",
     "CKM_EDDSA",
+    "CKM_RSA_PKCS_OAEP",
+    "CKG_MGF1_SHA256",
+    "CKZ_DATA_SPECIFIED",
 ]
 
 [nspr_err]
