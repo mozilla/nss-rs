@@ -169,7 +169,10 @@ impl<'a> Iterator for ScopedSECItemArrayIterator<'a> {
 ///
 /// This is used with NSS functions that return a variable amount of data.
 #[repr(transparent)]
+#[derive(derive_more::AsRef, derive_more::AsMut)]
 pub struct SECItemMut {
+    #[as_ref]
+    #[as_mut]
     inner: SECItem,
 }
 
@@ -181,18 +184,6 @@ impl Drop for SECItemMut {
         unsafe {
             SECITEM_FreeItem(&raw mut self.inner, PRBool::from(false));
         }
-    }
-}
-
-impl AsRef<SECItem> for SECItemMut {
-    fn as_ref(&self) -> &SECItem {
-        &self.inner
-    }
-}
-
-impl AsMut<SECItem> for SECItemMut {
-    fn as_mut(&mut self) -> &mut SECItem {
-        &mut self.inner
     }
 }
 
@@ -225,15 +216,11 @@ impl SECItemMut {
 /// This is usually used to pass a reference to some borrowed rust memory to
 /// NSS. It is occasionally used to accept non-owned output data from NSS.
 #[repr(transparent)]
+#[derive(derive_more::AsRef)]
 pub struct SECItemBorrowed<'a> {
+    #[as_ref]
     inner: SECItem,
     phantom_data: PhantomData<&'a u8>,
-}
-
-impl AsRef<SECItem> for SECItemBorrowed<'_> {
-    fn as_ref(&self) -> &SECItem {
-        &self.inner
-    }
 }
 
 impl AsMut<SECItem> for SECItemBorrowed<'_> {

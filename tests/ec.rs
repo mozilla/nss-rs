@@ -30,3 +30,70 @@ fn clone() {
     assert_eq!(a1_b, b_a1);
     assert_eq!(a1_b, b_a2);
 }
+
+#[test]
+fn keygen_p256() {
+    fixture_init();
+
+    let key = ecdh_keygen(&EcCurve::P256).unwrap();
+
+    let raw = key.public.key_data().unwrap();
+    assert_eq!(65, raw.len());
+    assert_eq!(4, raw[0]);
+
+    let alt = key.public.key_data_alt().unwrap();
+    assert_eq!(67, alt.len());
+    assert_eq!(&[4, 65, 4], &alt[0..3]);
+    assert_eq!(&alt[2..], raw.as_slice());
+}
+
+#[test]
+fn keygen_p384() {
+    fixture_init();
+
+    let key = ecdh_keygen(&EcCurve::P384).unwrap();
+
+    let raw = key.public.key_data().unwrap();
+    assert_eq!(97, raw.len());
+    assert_eq!(4, raw[0]);
+
+    let alt = key.public.key_data_alt().unwrap();
+    assert_eq!(99, alt.len());
+    assert_eq!(&[4, 97, 4], &alt[0..3]);
+    assert_eq!(&alt[2..], raw.as_slice());
+}
+
+#[test]
+fn keygen_p521() {
+    fixture_init();
+
+    let key = ecdh_keygen(&EcCurve::P521).unwrap();
+
+    let raw = key.public.key_data().unwrap();
+    assert_eq!(133, raw.len());
+    assert_eq!(4, raw[0]);
+
+    let alt = key.public.key_data_alt().unwrap();
+    assert_eq!(136, alt.len());
+    assert_eq!(&[4, 129, 133, 4], &alt[0..4]);
+    assert_eq!(&alt[3..], raw.as_slice());
+}
+
+#[test]
+fn keygen_ed25519() {
+    fixture_init();
+
+    let key = ecdh_keygen(&EcCurve::Ed25519).unwrap();
+
+    // Not valid for HPKE because keyType = edKey
+    assert!(key.public.key_data().is_err());
+}
+
+#[test]
+fn keygen_x25519() {
+    fixture_init();
+
+    let key = ecdh_keygen(&EcCurve::X25519).unwrap();
+
+    assert_eq!(32, key.public.key_data().unwrap().len());
+}

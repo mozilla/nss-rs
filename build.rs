@@ -19,7 +19,10 @@ use std::{
     process::Command,
 };
 
-use bindgen::Builder;
+use bindgen::{
+    Builder,
+    callbacks::{IntKind, ParseCallbacks},
+};
 use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
 
@@ -285,7 +288,7 @@ fn maybe_link_freebl3() -> Option<&'static str> {
     None
 }
 
-fn static_link() -> Vec<&'static str> {
+fn static_link(libdir: &Path) -> Vec<&'static str> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let mut static_libs = vec![
         "certdb",
@@ -345,6 +348,16 @@ fn static_link() -> Vec<&'static str> {
         static_libs.push("hw-acc-crypto-avx2");
         static_libs.push("intel-gcm-wrap_c_lib");
     }
+    // For libraries added in an NSS version greater than our minimum,
+    // check that they are present before linking them.
+    for libname in ["pqcwrap_static", "crux"] {
+        if [format!("{libname}.lib"), format!("lib{libname}.a")]
+            .iter()
+            .any(|f| libdir.join(f).is_file())
+        {
+            static_libs.push(libname);
+        }
+    }
     for lib in &static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
     }
@@ -355,6 +368,31 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     let nsprinclude = nsstarget.join("include").join("nspr");
     let nssinclude = nssdist.join("public").join("nss");
     vec![nsprinclude, nssinclude]
+}
+
+/// Type PKCS#11 `#define`s as the `CK_*` typedefs they belong to. Bindgen otherwise picks the
+/// smallest integer that fits the value, which needs a conversion at every use.
+#[derive(Debug)]
+struct Pkcs11Types;
+
+impl ParseCallbacks for Pkcs11Types {
+    fn int_macro(&self, name: &str, _: i64) -> Option<IntKind> {
+        // `CKD_*` gets CK_ULONG because CK_EC_KDF_TYPE isn't among the generated types, and
+        // that is what PK11_PubDeriveWithKDF's `kdf` parameter is declared as anyway.
+        let name = match name {
+            "CK_INVALID_HANDLE" => "CK_OBJECT_HANDLE",
+            n if n.starts_with("CKA_") => "CK_ATTRIBUTE_TYPE",
+            n if n.starts_with("CKF_") => "CK_FLAGS",
+            n if n.starts_with("CKG_") => "CK_GENERATOR_FUNCTION",
+            n if n.starts_with("CKM_") => "CK_MECHANISM_TYPE",
+            n if n.starts_with("CKD_") || n.starts_with("CK_") => "CK_ULONG",
+            _ => return None,
+        };
+        Some(IntKind::Custom {
+            name,
+            is_signed: false,
+        })
+    }
 }
 
 fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
@@ -368,6 +406,9 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
     let mut builder = Builder::default().header(header);
     builder = builder.generate_comments(false);
     builder = builder.size_t_is_usize(true);
+    if base == "nss_p11" {
+        builder = builder.parse_callbacks(Box::new(Pkcs11Types));
+    }
 
     builder = builder.clang_arg("-v");
 
@@ -517,7 +558,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
         // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
         || env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
     {
-        static_link()
+        static_link(&nsslibdir)
     } else {
         dynamic_link()
     };

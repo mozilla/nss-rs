@@ -13,8 +13,6 @@ use std::{
     ptr::null_mut,
 };
 
-use pkcs11_bindings::{CK_ULONG, CKA_DERIVE, CKA_SIGN, CKM_HKDF_DERIVE, CKM_HKDF_KEY_GEN};
-
 use crate::{
     Error, SECItem, SECItemBorrowed, SECItemType,
     constants::{
@@ -23,30 +21,32 @@ use crate::{
     },
     err::Res,
     p11::{
-        self, CK_ATTRIBUTE_TYPE, CK_BBOOL, CK_INVALID_HANDLE, CK_MECHANISM_TYPE,
-        CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_HKDF_DATA, PK11_ImportDataKey, PK11Origin,
-        PK11SymKey, Slot, SymKey, random,
+        self, CK_BBOOL, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_ULONG, CKA_DERIVE, CKA_SIGN,
+        CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_HKDF_DATA, CKM_HKDF_DERIVE, CKM_HKDF_KEY_GEN,
+        CKM_SHA256, CKM_SHA384, CKM_SHA512, PK11_ImportDataKey, PK11Origin, PK11SymKey, Slot,
+        SymKey, random,
     },
-    ssl::CK_OBJECT_HANDLE,
 };
 
-experimental_api!(SSL_HkdfExtract(
-    version: Version,
-    cipher: Cipher,
-    salt: *mut PK11SymKey,
-    ikm: *mut PK11SymKey,
-    prk: *mut *mut PK11SymKey,
-));
-experimental_api!(SSL_HkdfExpandLabel(
-    version: Version,
-    cipher: Cipher,
-    prk: *mut PK11SymKey,
-    handshake_hash: *const u8,
-    handshake_hash_len: c_uint,
-    label: *const c_char,
-    label_len: c_uint,
-    secret: *mut *mut PK11SymKey,
-));
+experimental_api! {
+    SSL_HkdfExtract(
+        version: Version,
+        cipher: Cipher,
+        salt: *mut PK11SymKey,
+        ikm: *mut PK11SymKey,
+        prk: *mut *mut PK11SymKey,
+    );
+    SSL_HkdfExpandLabel(
+        version: Version,
+        cipher: Cipher,
+        prk: *mut PK11SymKey,
+        handshake_hash: *const u8,
+        handshake_hash_len: c_uint,
+        label: *const c_char,
+        label_len: c_uint,
+        secret: *mut *mut PK11SymKey,
+    );
+}
 
 #[derive(Clone, Copy, Debug)]
 
@@ -69,10 +69,10 @@ pub enum KeyMechanism {
 }
 
 impl KeyMechanism {
-    fn mech(self) -> CK_MECHANISM_TYPE {
-        CK_MECHANISM_TYPE::from(match self {
+    const fn mech(self) -> CK_MECHANISM_TYPE {
+        match self {
             Self::Hkdf => CKM_HKDF_DERIVE,
-        })
+        }
     }
 
     const fn len(self) -> usize {
@@ -147,9 +147,9 @@ pub fn import_key(version: Version, buf: &[u8]) -> Res<SymKey> {
     let key_ptr = unsafe {
         PK11_ImportDataKey(
             *slot,
-            CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
+            CKM_HKDF_DERIVE,
             PK11Origin::PK11_OriginUnwrap,
-            CK_ATTRIBUTE_TYPE::from(CKA_DERIVE),
+            CKA_DERIVE,
             SECItemBorrowed::wrap(buf)?.as_mut(),
             null_mut(),
         )
@@ -227,9 +227,9 @@ impl Hkdf {
         let ptr = unsafe {
             p11::PK11_ImportSymKey(
                 *slot,
-                CK_MECHANISM_TYPE::from(CKM_HKDF_KEY_GEN),
+                CKM_HKDF_KEY_GEN,
                 PK11Origin::PK11_OriginUnwrap,
-                CK_ATTRIBUTE_TYPE::from(CKA_SIGN),
+                CKA_SIGN,
                 ikm_item_ptr,
                 null_mut(),
             )
@@ -238,12 +238,12 @@ impl Hkdf {
         Ok(s)
     }
 
-    fn mech(&self) -> CK_MECHANISM_TYPE {
-        CK_MECHANISM_TYPE::from(match self.kdf {
-            HkdfAlgorithm::HKDF_SHA2_256 => p11::CKM_SHA256,
-            HkdfAlgorithm::HKDF_SHA2_384 => p11::CKM_SHA384,
-            HkdfAlgorithm::HKDF_SHA2_512 => p11::CKM_SHA512,
-        })
+    const fn mech(&self) -> CK_MECHANISM_TYPE {
+        match self.kdf {
+            HkdfAlgorithm::HKDF_SHA2_256 => CKM_SHA256,
+            HkdfAlgorithm::HKDF_SHA2_384 => CKM_SHA384,
+            HkdfAlgorithm::HKDF_SHA2_512 => CKM_SHA512,
+        }
     }
 
     pub fn extract(&self, salt: &[u8], ikm: &SymKey) -> Result<SymKey, HkdfError> {
@@ -258,10 +258,10 @@ impl Hkdf {
             bExtract: CK_BBOOL::from(true),
             bExpand: CK_BBOOL::from(false),
             prfHashMechanism: self.mech(),
-            ulSaltType: CK_ULONG::from(salt_type),
+            ulSaltType: salt_type,
             pSalt: salt.as_ptr().cast_mut(), // const-cast = bad API
             ulSaltLen: CK_ULONG::try_from(salt.len()).map_err(|_| HkdfError::InvalidLength)?,
-            hSaltKey: CK_OBJECT_HANDLE::from(CK_INVALID_HANDLE),
+            hSaltKey: CK_INVALID_HANDLE,
             pInfo: null_mut(),
             ulInfoLen: 0,
         };
@@ -269,10 +269,10 @@ impl Hkdf {
         let ptr = unsafe {
             p11::PK11_Derive(
                 **ikm,
-                CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
+                CKM_HKDF_DERIVE,
                 params_item.ptr(),
-                CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
-                CK_MECHANISM_TYPE::from(CKA_DERIVE),
+                CKM_HKDF_DERIVE,
+                CKA_DERIVE,
                 0,
             )
         };
@@ -287,10 +287,10 @@ impl Hkdf {
             bExtract: CK_BBOOL::from(false),
             bExpand: CK_BBOOL::from(true),
             prfHashMechanism: self.mech(),
-            ulSaltType: CK_ULONG::from(CKF_HKDF_SALT_NULL),
+            ulSaltType: CKF_HKDF_SALT_NULL,
             pSalt: null_mut(),
             ulSaltLen: 0,
-            hSaltKey: CK_OBJECT_HANDLE::from(CK_INVALID_HANDLE),
+            hSaltKey: CK_INVALID_HANDLE,
             pInfo: info.as_ptr().cast_mut(), // const-cast = bad API
             ulInfoLen: CK_ULONG::try_from(info.len()).expect("Integer overflow"),
         }
@@ -309,10 +309,10 @@ impl Hkdf {
         let ptr = unsafe {
             p11::PK11_Derive(
                 **prk,
-                CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
+                CKM_HKDF_DERIVE,
                 params_item.ptr(),
                 key_mech.mech(),
-                CK_MECHANISM_TYPE::from(CKA_DERIVE),
+                CKA_DERIVE,
                 c_int::try_from(key_mech.len()).map_err(|_| HkdfError::InvalidLength)?,
             )
         };
@@ -328,10 +328,10 @@ impl Hkdf {
         let ptr = unsafe {
             p11::PK11_Derive(
                 **prk,
-                CK_MECHANISM_TYPE::from(CKM_HKDF_DATA),
+                CKM_HKDF_DATA,
                 params_item.ptr(),
-                CK_MECHANISM_TYPE::from(CKM_HKDF_DERIVE),
-                CK_MECHANISM_TYPE::from(CKA_DERIVE),
+                CKM_HKDF_DERIVE,
+                CKA_DERIVE,
                 c_int::try_from(len).map_err(|_| HkdfError::InvalidLength)?,
             )
         };

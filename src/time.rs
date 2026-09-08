@@ -11,13 +11,11 @@
 
 use std::{
     convert::{TryFrom as _, TryInto as _},
-    ops::Deref,
     os::raw::c_void,
     pin::Pin,
+    sync::OnceLock,
     time::{Duration, Instant},
 };
-
-use once_cell::sync::OnceCell;
 
 use crate::{
     agent::as_c_void,
@@ -28,11 +26,13 @@ use crate::{
 
 include!(concat!(env!("OUT_DIR"), "/nspr_time.rs"));
 
-experimental_api!(SSL_SetTimeFunc(
-    fd: *mut PRFileDesc,
-    cb: SSLTimeFunc,
-    arg: *mut c_void,
-));
+experimental_api! {
+    SSL_SetTimeFunc(
+        fd: *mut PRFileDesc,
+        cb: SSLTimeFunc,
+        arg: *mut c_void,
+    );
+}
 
 /// This struct holds the zero time used for converting between `Instant` and `PRTime`.
 #[derive(Debug)]
@@ -75,7 +75,7 @@ impl TimeZero {
     }
 }
 
-static BASE_TIME: OnceCell<TimeZero> = OnceCell::new();
+static BASE_TIME: OnceLock<TimeZero> = OnceLock::new();
 
 fn get_base() -> &'static TimeZero {
     BASE_TIME.get_or_init(|| TimeZero {
@@ -93,16 +93,9 @@ pub fn init() {
 }
 
 /// Time wraps Instant and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::Deref)]
 pub struct Time {
     t: Instant,
-}
-
-impl Deref for Time {
-    type Target = Instant;
-    fn deref(&self) -> &Self::Target {
-        &self.t
-    }
 }
 
 impl From<Instant> for Time {
@@ -159,7 +152,7 @@ impl From<Time> for Instant {
 }
 
 /// Interval wraps Duration and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::From)]
 pub struct Interval {
     d: Duration,
 }
@@ -170,12 +163,6 @@ impl TryFrom<PRTime> for Interval {
         Ok(Self {
             d: Duration::from_micros(u64::try_from(prtime)?),
         })
-    }
-}
-
-impl From<Duration> for Interval {
-    fn from(d: Duration) -> Self {
-        Self { d }
     }
 }
 
