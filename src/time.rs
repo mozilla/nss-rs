@@ -94,7 +94,7 @@ pub fn init() {
 }
 
 /// Time wraps Instant and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::Deref, derive_more::Into)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::Deref)]
 pub struct Time {
     t: Instant,
 }
@@ -143,6 +143,12 @@ impl TryInto<PRTime> for Time {
                 })
             },
         )
+    }
+}
+
+impl From<Time> for Instant {
+    fn from(t: Time) -> Self {
+        t.t
     }
 }
 

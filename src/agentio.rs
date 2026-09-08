@@ -90,6 +90,7 @@ impl fmt::Debug for Record {
 #[derive(Debug, Default, derive_more::Deref, derive_more::IntoIterator)]
 #[deref(forward)]
 pub struct RecordList {
+    #[into_iterator(owned)]
     records: Vec<Record>,
 }
 

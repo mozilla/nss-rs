@@ -171,6 +171,8 @@ impl<'a> Iterator for ScopedSECItemArrayIterator<'a> {
 #[repr(transparent)]
 #[derive(derive_more::AsRef, derive_more::AsMut)]
 pub struct SECItemMut {
+    #[as_ref]
+    #[as_mut]
     inner: SECItem,
 }
 
