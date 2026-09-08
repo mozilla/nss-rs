@@ -51,6 +51,9 @@ fn export_raw_sensitive_reports_failure() {
     // export must surface that NSS failure rather than returning an empty key.
     let (sk, _pk) = generate_ech_keys().expect("generate_ech_keys");
     assert!(export_ec_private_key_from_raw(&sk).is_err());
+}
+
+#[test]
 fn keygen_p256() {
     fixture_init();
 
