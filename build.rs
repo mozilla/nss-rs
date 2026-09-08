@@ -288,7 +288,7 @@ fn maybe_link_freebl3() -> Option<&'static str> {
     None
 }
 
-fn static_link() -> Vec<&'static str> {
+fn static_link(libdir: &Path) -> Vec<&'static str> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let mut static_libs = vec![
         "certdb",
@@ -347,6 +347,16 @@ fn static_link() -> Vec<&'static str> {
         static_libs.push("hw-acc-crypto-avx");
         static_libs.push("hw-acc-crypto-avx2");
         static_libs.push("intel-gcm-wrap_c_lib");
+    }
+    // For libraries added in an NSS version greater than our minimum,
+    // check that they are present before linking them.
+    for libname in ["pqcwrap_static", "crux"] {
+        if [format!("{libname}.lib"), format!("lib{libname}.a")]
+            .iter()
+            .any(|f| libdir.join(f).is_file())
+        {
+            static_libs.push(libname);
+        }
     }
     for lib in &static_libs {
         println!("cargo:rustc-link-lib=static={lib}");
@@ -548,7 +558,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
         // FIXME: NSPR doesn't build proper dynamic libraries on Windows.
         || env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
     {
-        static_link()
+        static_link(&nsslibdir)
     } else {
         dynamic_link()
     };
