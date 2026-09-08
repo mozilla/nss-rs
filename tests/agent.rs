@@ -78,6 +78,30 @@ fn basic() {
     );
 }
 
+#[test]
+fn reject_certificate_fails_handshake() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    let bytes = client.handshake(now(), &[]).expect("send CH");
+    let bytes = server
+        .handshake(now(), &bytes[..])
+        .expect("read CH, send SH");
+    let bytes = client.handshake(now(), &bytes[..]).expect("send CF");
+    assert!(bytes.is_empty());
+    assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
+
+    // Reject the peer certificate.
+    client.authenticated(AuthenticationStatus::CertRevoked);
+    assert!(matches!(client.state(), HandshakeState::Authenticated(err) if *err != 0));
+
+    // Continuing must not report a completed handshake.
+    assert!(client.handshake(now(), &[]).is_err());
+    assert!(!client.state().is_connected());
+    assert!(matches!(client.state(), HandshakeState::Failed(_)));
+}
+
 fn check_client_preinfo(client_preinfo: &SecretAgentPreInfo) {
     assert_eq!(client_preinfo.version(), None);
     assert_eq!(client_preinfo.cipher_suite(), None);

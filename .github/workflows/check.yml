@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+        uses: mozilla/actions/toolchains@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
 
   check:
     name: Run checks
@@ -77,7 +77,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: mozilla/actions/rust@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: mozilla/actions/rust@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
         with:
           version: stable
           tools: cargo-hack
@@ -195,6 +195,17 @@ jobs:
           target: ${{ matrix.target }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  check-i686:
+    name: Check i686-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/check-i686
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   check-distro:
     name: Check with system NSS on ${{ matrix.name }}
     runs-on: ubuntu-24.04
@@ -211,15 +222,15 @@ jobs:
         include:
           - name: Fedora
             # renovate: depName=fedora datasource=docker
-            container: fedora:latest@sha256:498c452f32a739b61f0ef215bce9924ebc4866cbe44710f58157d77723b7a6d2
+            container: fedora:latest@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
-            container: opensuse/tumbleweed:latest@sha256:c676589887bd2b33dd82a54c88b1721abf144adabdb2124b03ba606998310969
+            container: opensuse/tumbleweed:latest@sha256:8059a34839bdc8dccd685e93901e03ba31cc5905c0d55c23639c414b3d76c1ac
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
-            container: archlinux:latest@sha256:4bf33b21a715aac0b48ce6e9eaed4782a898eae96f88f5da3635572129c2584a
+            container: archlinux:latest@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
           - name: Alpine
             # renovate: depName=alpine datasource=docker
@@ -230,14 +241,14 @@ jobs:
             rustflags: "-C target-feature=-crt-static"
           - name: Gentoo
             # renovate: depName=gentoo/stage3 datasource=docker
-            container: gentoo/stage3:latest@sha256:d1255d75f9b34bf68745a8c38f307513e9a6fc97e464abbc638eb4d4319991b2
+            container: gentoo/stage3:latest@sha256:b27165201b3dbec4214b3cf771c1fde087e233acba78997ac5e45b0c74535200
             install: >-
               emerge-webrsync -q &&
               emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
               ACCEPT_KEYWORDS="~amd64" emerge -q --getbinpkg --quiet-build=y -1 dev-libs/nss
           - name: Slackware
             # renovate: depName=aclemons/slackware datasource=docker
-            container: aclemons/slackware:current-full@sha256:b39bb142e4b3394863b2ac890075bec8c5072548f18926dcaa84ec917d116f42
+            container: aclemons/slackware:current-full@sha256:e07a4d1c18b0c3d1dc07b7c622d65bd87245e5ab6c6805f20bc472873d57f1e5
             # current-full ships a complete Slackware installation including all deps
             install: ":"
     defaults:
@@ -283,7 +294,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.22.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 

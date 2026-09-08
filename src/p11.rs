@@ -19,8 +19,6 @@ use std::{
     ptr::null_mut,
 };
 
-use pkcs11_bindings::{CKA_EC_POINT, CKA_VALUE};
-
 use crate::{
     err::{Error, Res, secstatus_to_res},
     nss_prelude::SECITEM_FreeItem,
@@ -236,7 +234,7 @@ impl Slot {
                 null_mut(),
                 c_int::try_from(key_size).map_err(|_| Error::IntegerOverflow)?,
                 null_mut(),
-                CK_FLAGS::from(CKF_ENCRYPT | CKF_DECRYPT),
+                CKF_ENCRYPT | CKF_DECRYPT,
                 PK11AttrFlags::from(PK11_ATTR_TOKEN | PK11_ATTR_PRIVATE | PK11_ATTR_SENSITIVE),
                 null_mut(),
             ))

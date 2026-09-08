@@ -6,11 +6,6 @@
 
 use std::ptr;
 
-use pkcs11_bindings::{
-    CK_FALSE, CKA_VALUE, CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN,
-    CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
-};
-
 // use std::ptr::null;
 // use std::ptr::null_mut;
 use crate::{
@@ -18,7 +13,10 @@ use crate::{
     err::{Error, IntoResult as _, secstatus_to_res},
     init,
     p11::{
-        KU_ALL, PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPair,
+        CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CKA_SIGN, CKA_VALUE, CKD_NULL,
+        CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN, CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+        CKM_ECDH1_DERIVE, CKM_ECDSA, CKM_EDDSA, CKM_SHA512_HMAC, KU_ALL,
+        PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPair,
         PK11_ImportDERPrivateKeyInfoAndReturnKey, PK11_ImportPublicKey, PK11_PubDeriveWithKDF,
         PK11_ReadRawAttribute, PK11ObjectType::PK11_TypePrivKey,
         SECKEY_DecodeDERSubjectPublicKeyInfo, Slot,
@@ -107,7 +105,7 @@ fn ec_curve_to_oid(alg: &EcCurve) -> Vec<u8> {
     }
 }
 
-const fn ec_curve_to_ckm(alg: &EcCurve) -> pkcs11_bindings::CK_MECHANISM_TYPE {
+const fn ec_curve_to_ckm(alg: &EcCurve) -> CK_MECHANISM_TYPE {
     match alg {
         EcCurve::P256 | EcCurve::P384 | EcCurve::P521 => CKM_EC_KEY_PAIR_GEN,
         EcCurve::Ed25519 => CKM_EC_EDWARDS_KEY_PAIR_GEN,
@@ -144,8 +142,8 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
             ckm,
             oid_ptr.cast(),
             &raw mut pk_ptr,
-            CK_FALSE.into(),
-            CK_FALSE.into(),
+            PRBool::from(false),
+            PRBool::from(false),
             ptr::null_mut(),
         )
         .into_result()?;
@@ -182,7 +180,7 @@ pub fn import_ec_public_key_from_spki(spki: &[u8]) -> Result<PublicKey, Error> {
                 .into_result()?;
 
         let handle = PK11_ImportPublicKey(*slot, *pk, PRBool::from(false));
-        if handle == pkcs11_bindings::CK_INVALID_HANDLE {
+        if handle == CK_INVALID_HANDLE {
             return Err(Error::InvalidInput);
         }
 
@@ -237,11 +235,11 @@ pub fn ecdh(sk: &PrivateKey, pk: &PublicKey) -> Result<Vec<u8>, Error> {
             0,
             ptr::null_mut(),
             ptr::null_mut(),
-            pkcs11_bindings::CKM_ECDH1_DERIVE,
-            pkcs11_bindings::CKM_SHA512_HMAC,
-            pkcs11_bindings::CKA_SIGN,
+            CKM_ECDH1_DERIVE,
+            CKM_SHA512_HMAC,
+            CKA_SIGN,
             0,
-            pkcs11_bindings::CKD_NULL,
+            CKD_NULL,
             ptr::null_mut(),
             ptr::null_mut(),
         )
@@ -263,7 +261,7 @@ pub fn convert_to_public(sk: &PrivateKey) -> Result<PublicKey, Error> {
 pub fn sign(
     private_key: &PrivateKey,
     data: &[u8],
-    mechanism: std::os::raw::c_ulong,
+    mechanism: CK_MECHANISM_TYPE,
 ) -> Result<Vec<u8>, Error> {
     init()?;
     let data_signature = vec![0u8; 0x40];
@@ -284,23 +282,19 @@ pub fn sign(
     }
 }
 
-#[allow(clippy::allow_attributes)]
-#[allow(clippy::useless_conversion)]
 pub fn sign_ecdsa(private_key: &PrivateKey, data: &[u8]) -> Result<Vec<u8>, Error> {
-    sign(private_key, data, crate::p11::CKM_ECDSA.into())
+    sign(private_key, data, CKM_ECDSA)
 }
 
-#[allow(clippy::allow_attributes)]
-#[allow(clippy::useless_conversion)]
 pub fn sign_eddsa(private_key: &PrivateKey, data: &[u8]) -> Result<Vec<u8>, Error> {
-    sign(private_key, data, crate::p11::CKM_EDDSA.into())
+    sign(private_key, data, CKM_EDDSA)
 }
 
 pub fn verify(
     public_key: &PublicKey,
     data: &[u8],
     signature: &[u8],
-    mechanism: std::os::raw::c_ulong,
+    mechanism: CK_MECHANISM_TYPE,
 ) -> Result<bool, Error> {
     init()?;
     unsafe {
@@ -323,14 +317,10 @@ pub fn verify(
     }
 }
 
-#[allow(clippy::allow_attributes)]
-#[allow(clippy::useless_conversion)]
 pub fn verify_ecdsa(public_key: &PublicKey, data: &[u8], signature: &[u8]) -> Result<bool, Error> {
-    verify(public_key, data, signature, crate::p11::CKM_ECDSA.into())
+    verify(public_key, data, signature, CKM_ECDSA)
 }
 
-#[allow(clippy::allow_attributes)]
-#[allow(clippy::useless_conversion)]
 pub fn verify_eddsa(public_key: &PublicKey, data: &[u8], signature: &[u8]) -> Result<bool, Error> {
-    verify(public_key, data, signature, crate::p11::CKM_EDDSA.into())
+    verify(public_key, data, signature, CKM_EDDSA)
 }

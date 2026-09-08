@@ -5,3 +5,10 @@ self-hosted-runner:
     - moonshot
     - moonshot-exp
     - codspeed-macro
+
+# actionlint does not understand the `$/` syntax (an action in this repo at the
+# running commit), so ignore its "ref is missing" error where we use it.
+paths:
+  "**/*.{yml,yaml}":
+    ignore:
+      - 'specifying action "\$/[^"]+" in invalid format because ref is missing'
