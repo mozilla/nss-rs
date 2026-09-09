@@ -173,7 +173,7 @@ impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
     }
 }
 
-impl SECItemBorrowed<&'_ [u8]> {
+impl<'a> SECItemBorrowed<&'a [u8]> {
     /// Create an empty `SECItemBorrowed`.
     ///
     /// This can be used to pass an empty, read-only item as an argument.
@@ -193,9 +193,7 @@ impl SECItemBorrowed<&'_ [u8]> {
             phantom_data: PhantomData,
         }
     }
-}
 
-impl<'a> SECItemBorrowed<&'a [u8]> {
     /// Create a `SECItemBorrowed` wrapping a slice.
     ///
     /// Creating this object is technically safe, but using it is extremely dangerous.
