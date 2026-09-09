@@ -197,7 +197,6 @@ impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
         unsafe { self.inner.as_slice() }
     }
 
-    #[cfg(test)] // remove when follow-up uses this
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
