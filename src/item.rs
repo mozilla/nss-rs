@@ -283,7 +283,11 @@ impl<'a> SECItemBorrowed<&'a mut [u8]> {
         Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: buf.as_mut_ptr().cast(),
+                data: if buf.is_empty() {
+                    null_mut()
+                } else {
+                    buf.as_mut_ptr().cast()
+                },
                 len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
             },
             phantom_data: PhantomData,
