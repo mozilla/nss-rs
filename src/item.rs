@@ -200,6 +200,7 @@ impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
         unsafe { self.inner.as_slice() }
     }
 
+    #[allow(clippy::allow_attributes, dead_code, reason = "follow up coming")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()

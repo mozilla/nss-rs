@@ -273,8 +273,7 @@ pub fn sign(
             data_to_sign.as_ptr(),
         ))?;
 
-        let signature = signature.as_slice().to_vec();
-        Ok(signature)
+        Ok(data_signature)
     }
 }
 
