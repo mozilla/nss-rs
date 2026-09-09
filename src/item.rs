@@ -345,6 +345,12 @@ mod tests {
         assert_eq!(SECItemBorrowed::wrap(DATA).as_slice(), DATA);
         assert!(SECItemBorrowed::wrap(&[]).as_slice().is_empty());
         assert!(SECItemBorrowed::make_empty().as_slice().is_empty());
+        // An empty slice is normalised to null, matching `make_empty`.
+        assert!(unsafe { (*SECItemBorrowed::wrap(&[]).as_ptr()).data }.is_null());
+        assert_eq!(
+            unsafe { (*SECItemBorrowed::wrap(DATA).as_ptr()).data }.cast_const(),
+            DATA.as_ptr()
+        );
     }
 
     #[test]
