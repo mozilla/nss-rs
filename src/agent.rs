@@ -1232,7 +1232,7 @@ impl Server {
                 authType: ssl::SSLAuthType::ssl_auth_null,
                 certChain: null(),
                 stapledOCSPResponses: &raw const ocsp_array,
-                signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
+                signedCertTimestamps: sct_item.as_ptr(),
                 delegCred: null(),
                 delegCredPrivKey: null(),
             };

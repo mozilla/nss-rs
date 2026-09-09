@@ -72,13 +72,20 @@ unsafe fn destroy_secitem_array(array: *mut SECItemArray) {
 }
 scoped_ptr!(ScopedSECItemArray, SECItemArray, destroy_secitem_array);
 
+impl ScopedSECItemArray {
+    #[must_use]
+    pub fn iter(&self) -> ScopedSECItemArrayIterator<'_> {
+        ScopedSECItemArrayIterator {
+            iter: AsRef::<[SECItem]>::as_ref(self).iter(),
+        }
+    }
+}
+
 impl<'a> IntoIterator for &'a ScopedSECItemArray {
     type Item = &'a [u8];
     type IntoIter = ScopedSECItemArrayIterator<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        Self::IntoIter {
-            iter: AsRef::<[SECItem]>::as_ref(self).iter(),
-        }
+        self.iter()
     }
 }
 
@@ -162,7 +169,10 @@ impl SECItemMut {
 /// ```
 ///
 /// The borrowed item is dropped on the first line, with the pointer now referencing
-/// freed memory.  Either hold the wrapper while the pointer is used:
+/// reclaimed stack space. This can succeed silently, because the buffer remains,
+/// but it is a latent bug.
+///
+/// Either hold the wrapper while the pointer is used:
 /// ```ignore
 /// let wrapper = SECItemBorrowed::wrap(&buf);
 /// unsafe { NSS_Function(ptr.as_ptr()) }
@@ -235,6 +245,7 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     /// If the slice is so large that it is longer than a `c_uint` can handle.
     ///
     /// [`wrap_mut`]: Self::wrap_mut
+    #[must_use]
     pub fn wrap(buf: &'a [u8]) -> Self {
         Self {
             inner: SECItem {
@@ -263,6 +274,7 @@ impl<'a> SECItemBorrowed<&'a mut [u8]> {
     ///
     /// # Panics
     /// If the slice is so large that it is longer than a `c_uint` can handle.
+    #[must_use]
     pub fn wrap_mut(buf: &'a mut [u8]) -> Self {
         Self {
             inner: SECItem {
@@ -293,9 +305,7 @@ pub struct ParamItem<'a, T> {
 
 impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     /// Wrap a struct in a `SECItem` for use as a parameter.
-    ///
-    /// # Panics
-    /// If the slice is so large that it is longer than a `c_uint` can handle.
+    #[must_use]
     pub fn wrap(v: &'a T) -> Self {
         let p: *const T = &raw const *v;
         Self {
@@ -312,5 +322,40 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     #[must_use]
     pub const fn as_ptr(&self) -> *const SECItem {
         &raw const self.inner
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::{ParamItem, SECItemBorrowed};
+
+    const DATA: &[u8] = &[1, 2, 3, 4, 5];
+
+    #[test]
+    fn wrap_roundtrip() {
+        assert_eq!(SECItemBorrowed::wrap(DATA).as_slice(), DATA);
+        assert!(SECItemBorrowed::wrap(&[]).as_slice().is_empty());
+        assert!(SECItemBorrowed::make_empty().as_slice().is_empty());
+    }
+
+    #[test]
+    fn wrap_mut_roundtrip() {
+        let mut buf = DATA.to_owned();
+        let mut item = SECItemBorrowed::wrap_mut(&mut buf);
+        assert_eq!(
+            usize::try_from(unsafe { (*item.as_mut_ptr()).len }).unwrap(),
+            DATA.len(),
+        );
+        assert_eq!(item.as_slice(), DATA);
+    }
+
+    #[test]
+    fn param_len_is_size_of() {
+        let v = 0x1234_5678_u32;
+        assert_eq!(
+            usize::try_from(unsafe { (*ParamItem::wrap(&v).as_ptr()).len }).unwrap(),
+            size_of::<u32>()
+        );
     }
 }
