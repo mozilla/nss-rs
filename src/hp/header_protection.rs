@@ -14,7 +14,7 @@ use std::{
 
 use super::{SAMPLE_SIZE, SSL_HkdfExpandLabelWithMech};
 use crate::{
-    SECItemBorrowed,
+    ParamItem, SECItemBorrowed,
     aead::AeadAlgorithms,
     constants::{Cipher, Version},
     err::{Error, Res, secstatus_to_res},
@@ -30,7 +30,7 @@ fn make_aes_ctx(key: &SymKey) -> Res<Context> {
             CKM_AES_ECB,
             CKA_ENCRYPT,
             **key,
-            SECItemBorrowed::make_empty().as_ref(),
+            SECItemBorrowed::make_empty().as_ptr(),
         )
     })
     .map_err(|_| Error::CipherInit)
@@ -134,12 +134,12 @@ impl Key {
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;
-                let mut param_item = SECItemBorrowed::wrap_struct(&params)?;
+                let param_item = ParamItem::wrap(&params)?;
                 secstatus_to_res(unsafe {
                     PK11_Encrypt(
                         **key,
                         CKM_CHACHA20,
-                        std::ptr::from_mut(param_item.as_mut()),
+                        param_item.as_ptr().cast_mut(), // const_cast!
                         output[..].as_mut_ptr(),
                         &raw mut output_len,
                         c_uint::try_from(output.len())?,

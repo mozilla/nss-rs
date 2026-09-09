@@ -1217,7 +1217,7 @@ impl Server {
         let mut agent = SecretAgent::new()?;
         for n in certificates {
             let (cert, key) = load_cert_and_key(n.as_ref())?;
-            let ocsp_items: Vec<SECItemBorrowed> = ocsp_responses
+            let ocsp_items: Vec<SECItemBorrowed<&[u8]>> = ocsp_responses
                 .iter()
                 .map(|b| SECItemBorrowed::wrap(b))
                 .collect::<Res<_>>()?;

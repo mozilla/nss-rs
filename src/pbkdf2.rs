@@ -34,10 +34,10 @@ pub fn pbkdf2(
     let iterations = c_int::try_from(iterations)?;
     let key_len_int = c_int::try_from(key_len)?;
 
-    let mut salt_item = SECItemBorrowed::wrap(salt)?;
+    let salt_item = SECItemBorrowed::wrap(salt)?;
 
     let slot = Slot::internal()?;
-    let mut pw_item = SECItemBorrowed::wrap(password)?;
+    let pw_item = SECItemBorrowed::wrap(password)?;
 
     let algid = unsafe {
         PK11_CreatePBEV2AlgorithmID(
@@ -46,7 +46,7 @@ pub fn pbkdf2(
             alg.prf_oid(),
             key_len_int,
             iterations,
-            salt_item.as_mut(),
+            salt_item.as_ptr().cast_mut(), // const_cast!
         )
     };
     if algid.is_null() {
@@ -57,7 +57,7 @@ pub fn pbkdf2(
         PK11_PBEKeyGen(
             *slot,
             algid,
-            pw_item.as_mut(),
+            pw_item.as_ptr().cast_mut(), // const_cast!
             PRBool::from(false),
             null_mut(),
         )

@@ -214,45 +214,34 @@ impl SECItemMut {
 /// This is usually used to pass a reference to some borrowed rust memory to
 /// NSS. It is occasionally used to accept non-owned output data from NSS.
 #[repr(transparent)]
-#[derive(derive_more::AsRef)]
-pub struct SECItemBorrowed<'a> {
-    #[as_ref]
+pub struct SECItemBorrowed<T> {
     inner: SECItem,
-    phantom_data: PhantomData<&'a u8>,
+    phantom_data: PhantomData<T>,
 }
 
-impl AsMut<SECItem> for SECItemBorrowed<'_> {
-    /// Get a mutable reference to the underlying `SECItem` struct.
-    ///
-    /// Note that even if the `SECItem` struct is mutable, the buffer it
-    /// references may not be. Take care not to pass the mutable
-    /// `SECItem` to NSS routines that will violate mutability rules.
-    //
-    // TODO: Should we make the danger more obvious, by using a non-trait method
-    // with "unsafe" in the name, or an unsafe method?
-    fn as_mut(&mut self) -> &mut SECItem {
-        &mut self.inner
-    }
-}
-
-impl<'a> SECItemBorrowed<'a> {
+impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
     /// Return contents as a slice.
     #[must_use]
-    pub fn as_slice(&self) -> &'a [u8] {
+    pub fn as_slice(&self) -> &[u8] {
         unsafe { self.inner.as_slice() }
     }
 
+    /// Get a raw const pointer to the item.
+    #[must_use]
+    pub const fn as_ptr(&self) -> *const SECItem {
+        &raw const self.inner
+    }
+}
+
+impl SECItemBorrowed<&'_ [u8]> {
     /// Create an empty `SECItemBorrowed`.
     ///
-    /// This can be used (1) to pass an empty item as an argument, and (2) as an
-    /// output parameter when NSS returns a pointer to NSS-owned memory that
-    /// should not be freed when the `SECItem` is dropped.  If the memory should
-    /// be freed when the `SECItem` is dropped, use `SECItemMut`.
+    /// This can be used to pass an empty, read-only item as an argument.
     ///
     /// It is safe to let the caller specify any lifetime here because no
-    /// borrowing is actually taking place. However, if the pointer in the
-    /// returned item is modified, care must be taken that the specified
-    /// lifetime accurately reflects the data referenced by the pointer.
+    /// borrowing is actually taking place.  However, it is not safe to pass the
+    /// resulting struct to functions that modify this: the lifetime will not
+    /// be updated to match.
     #[must_use]
     pub const fn make_empty() -> Self {
         SECItemBorrowed {
@@ -264,37 +253,78 @@ impl<'a> SECItemBorrowed<'a> {
             phantom_data: PhantomData,
         }
     }
+}
 
+impl<'a> SECItemBorrowed<&'a [u8]> {
     /// Create a `SECItemBorrowed` wrapping a slice.
     ///
     /// Creating this object is technically safe, but using it is extremely dangerous.
-    /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
-    /// or those that treat their argument as `const`.
+    /// More dangerous even than [`wrap_mut`], which at least borrows the slice mutably.
+    ///
+    /// This can be passed as a `const SECItem*` argument to functions, but it is only
+    /// safe if those functions also treat the data that the `SECItem` points to as
+    /// const also, something that the C code does not ensure, because `SECItem.data`
+    /// is a plain `unsigned char*` rather than a `const unsigned char*`.
+    ///
+    /// [`wrap_mut`]: Self::wrap_mut
     pub fn wrap(buf: &'a [u8]) -> Res<Self> {
         Ok(Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: buf.as_ptr().cast_mut(),
+                data: buf.as_ptr().cast_mut().cast(),
                 len: c_uint::try_from(buf.len())?,
             },
             phantom_data: PhantomData,
         })
     }
+}
 
-    /// Create a `SECItemBorrowed` wrapping a struct.
+impl<'a> SECItemBorrowed<&'a mut [u8]> {
+    /// Get a raw mut pointer to the item.
+    pub const fn as_mut_ptr(&mut self) -> *mut SECItem {
+        &raw mut self.inner
+    }
+
+    /// Create a `SECItemBorrowed` wrapping a mutable slice.
     ///
     /// Creating this object is technically safe, but using it is extremely dangerous.
-    /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
-    /// or those that treat their argument as `const`.
-    pub fn wrap_struct<T>(v: &'a T) -> Res<Self> {
-        let data: *const T = v;
+    /// The resulting object can be passed as a `SECItem*` argument to functions,
+    /// but this is not safe if those functions free or reallocate the memory.
+    /// This has to be restricted to those functions that limit their actions to
+    /// writing to the memory they are provided.
+    pub fn wrap_mut(buf: &'a mut [u8]) -> Res<Self> {
         Ok(Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: data.cast_mut().cast(),
-                len: c_uint::try_from(size_of::<T>())?,
+                data: buf.as_mut_ptr().cast(),
+                len: c_uint::try_from(buf.len())?,
             },
             phantom_data: PhantomData,
         })
+    }
+}
+
+pub struct ParamItem<'a, T> {
+    inner: SECItem,
+    marker: PhantomData<&'a T>,
+}
+
+impl<'a, T: Sized + 'a> ParamItem<'a, T> {
+    pub fn wrap(v: &'a T) -> Res<Self> {
+        let p: *const T = &raw const *v;
+        Ok(Self {
+            inner: SECItem {
+                type_: SECItemType::siBuffer,
+                data: p.cast_mut().cast(),
+                len: c_uint::try_from(size_of::<T>())?,
+            },
+            marker: PhantomData,
+        })
+    }
+
+    /// Get a raw const pointer to the item.
+    #[must_use]
+    pub const fn as_ptr(&self) -> *const SECItem {
+        &raw const self.inner
     }
 }

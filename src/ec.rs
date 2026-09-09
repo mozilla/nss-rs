@@ -9,7 +9,7 @@ use std::ptr;
 // use std::ptr::null;
 // use std::ptr::null_mut;
 use crate::{
-    PrivateKey, PublicKey, SECItem, SECItemBorrowed, der,
+    PrivateKey, PublicKey, SECItemBorrowed, der,
     err::{Error, IntoResult as _, secstatus_to_res},
     init,
     p11::{
@@ -120,8 +120,8 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
     // Get the OID for the Curve
     let curve_oid = ec_curve_to_oid(curve);
     let oid_bytes = der::object_id(&curve_oid)?;
-    let mut oid = SECItemBorrowed::wrap(&oid_bytes)?;
-    let oid_ptr: *mut SECItem = oid.as_mut();
+    let oid = SECItemBorrowed::wrap(&oid_bytes)?;
+    let oid_ptr = oid.as_ptr();
 
     // Get the Mechanism based on the Curve and its use
     let ckm = ec_curve_to_ckm(curve);
@@ -137,7 +137,7 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
         let sk = PK11_GenerateKeyPair(
             *slot,
             ckm,
-            oid_ptr.cast(),
+            oid_ptr.cast_mut().cast(), // const_cast to void*!
             &raw mut pk_ptr,
             PRBool::from(false),
             PRBool::from(false),
@@ -167,8 +167,8 @@ pub fn export_ec_private_key_pkcs8(key: &PrivateKey) -> Result<Vec<u8>, Error> {
 
 pub fn import_ec_public_key_from_spki(spki: &[u8]) -> Result<PublicKey, Error> {
     init()?;
-    let mut spki_item = SECItemBorrowed::wrap(spki)?;
-    let spki_item_ptr = spki_item.as_mut();
+    let spki_item = SECItemBorrowed::wrap(spki)?;
+    let spki_item_ptr = spki_item.as_ptr();
     let slot = Slot::internal()?;
     unsafe {
         let spki = SECKEY_DecodeDERSubjectPublicKeyInfo(spki_item_ptr).into_result()?;
@@ -190,8 +190,7 @@ pub fn import_ec_private_key_pkcs8(pki: &[u8]) -> Result<PrivateKey, Error> {
 
     // Get the PKCS11 slot
     let slot = Slot::internal()?;
-    let mut der_pki = SECItemBorrowed::wrap(pki)?;
-    let der_pki_ptr: *mut SECItem = der_pki.as_mut();
+    let der_pki = SECItemBorrowed::wrap(pki)?;
 
     // Create a pointer for the private key
     let mut pk_ptr = ptr::null_mut();
@@ -199,7 +198,7 @@ pub fn import_ec_private_key_pkcs8(pki: &[u8]) -> Result<PrivateKey, Error> {
     unsafe {
         secstatus_to_res(PK11_ImportDERPrivateKeyInfoAndReturnKey(
             *slot,
-            der_pki_ptr,
+            der_pki.as_ptr().cast_mut(), // const_cast!
             ptr::null_mut(),
             ptr::null_mut(),
             0,
@@ -261,17 +260,17 @@ pub fn sign(
     mechanism: CK_MECHANISM_TYPE,
 ) -> Result<Vec<u8>, Error> {
     init()?;
-    let data_signature = vec![0u8; 0x40];
+    let mut data_signature = vec![0u8; 0x40];
 
-    let mut data_to_sign = SECItemBorrowed::wrap(data)?;
-    let mut signature = SECItemBorrowed::wrap(&data_signature)?;
+    let data_to_sign = SECItemBorrowed::wrap(data)?;
+    let mut signature = SECItemBorrowed::wrap_mut(&mut data_signature)?;
     unsafe {
         secstatus_to_res(crate::p11::PK11_SignWithMechanism(
             private_key.as_mut().ok_or(Error::InvalidInput)?,
             mechanism,
             ptr::null_mut(),
-            signature.as_mut(),
-            data_to_sign.as_mut(),
+            signature.as_mut_ptr(),
+            data_to_sign.as_ptr(),
         ))?;
 
         let signature = signature.as_slice().to_vec();
@@ -295,15 +294,15 @@ pub fn verify(
 ) -> Result<bool, Error> {
     init()?;
     unsafe {
-        let mut data_to_sign = SECItemBorrowed::wrap(data)?;
-        let mut signature = SECItemBorrowed::wrap(signature)?;
+        let data_to_sign = SECItemBorrowed::wrap(data)?;
+        let signature = SECItemBorrowed::wrap(signature)?;
 
         let rv = crate::p11::PK11_VerifyWithMechanism(
             public_key.as_mut().ok_or(Error::InvalidInput)?,
             mechanism,
             ptr::null_mut(),
-            signature.as_mut(),
-            data_to_sign.as_mut(),
+            signature.as_ptr(),
+            data_to_sign.as_ptr(),
             ptr::null_mut(),
         );
 

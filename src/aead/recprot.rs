@@ -38,7 +38,7 @@ fn make_ctx(
             mech,
             op,
             **key,
-            SECItemBorrowed::wrap(nonce_base.as_slice())?.as_ref(),
+            SECItemBorrowed::wrap(nonce_base.as_slice())?.as_ptr(),
         )
     };
     Context::from_ptr(ptr)

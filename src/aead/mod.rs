@@ -250,18 +250,16 @@ pub struct Aead {
 
 impl Aead {
     pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
-        let slot = p11::Slot::internal().map_err(|_| Error::Internal)?;
+        let slot = p11::Slot::internal()?;
 
         let key_item = SECItemBorrowed::wrap(key)?;
-        let key_item_ptr = std::ptr::from_ref(key_item.as_ref()).cast_mut();
-
         let ptr = unsafe {
             p11::PK11_ImportSymKey(
                 *slot,
                 algorithm.p11_mech(),
                 p11::PK11Origin::PK11_OriginUnwrap,
                 CKA_ENCRYPT | CKA_DECRYPT,
-                key_item_ptr,
+                key_item.as_ptr().cast_mut(), // const_cast!
                 null_mut(),
             )
         };
@@ -281,7 +279,7 @@ impl Aead {
                 algorithm.p11_mech(),
                 mode.p11mode(),
                 **key,
-                SECItemBorrowed::wrap(&nonce_base[..])?.as_ref(),
+                SECItemBorrowed::wrap(&nonce_base[..])?.as_ptr(),
             )
         };
         Ok(Self {
