@@ -1218,14 +1218,19 @@ impl Server {
         let mut agent = SecretAgent::new()?;
         for n in certificates {
             let (cert, key) = load_cert_and_key(n.as_ref())?;
+
             let ocsp_items = ocsp_responses
                 .iter()
                 .map(|b| SECItemBorrowed::wrap(b))
                 .collect::<Vec<_>>();
+            #[expect(clippy::unnecessary_safety_comment, reason = "this is safety docs")]
+            // SAFETY: This depends on `SECItemBorrowed` being `#[repr(transparent)]`
+            // so that it can be aliased directly to a `SECItem`.
             let ocsp_array = SECItemArray {
                 items: ocsp_items.as_ptr().cast::<SECItem>().cast_mut(),
                 len: c_uint::try_from(ocsp_items.len())?,
             };
+
             let sct_item = SECItemBorrowed::wrap(scts);
             let extra = ssl::SSLExtraServerCertDataStr {
                 // ssl_auth_null means "I don't care what sort of certificate this is".

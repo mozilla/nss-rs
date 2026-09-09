@@ -97,7 +97,7 @@ impl CertificateInfo {
 
     #[must_use]
     pub fn iter(&self) -> ScopedSECItemArrayIterator<'_> {
-        self.certs.into_iter()
+        self.certs.iter()
     }
 
     #[must_use]

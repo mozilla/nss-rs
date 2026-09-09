@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{marker::PhantomData, os::raw::c_uint, ptr::null_mut, slice::Iter};
+use std::{marker::PhantomData, os::raw::c_uint, ptr, slice::Iter};
 
 pub use crate::nss_prelude::{SECItem, SECItemArray, SECItemType};
 use crate::{
@@ -26,18 +26,17 @@ impl SECItem {
     pub unsafe fn as_slice<'a>(&self) -> &'a [u8] {
         // Sanity check the type, as some types don't count bytes in `Item::len`.
         assert_eq!(self.type_, SECItemType::siBuffer);
-        // Note: `from_raw_parts` requires non-null `data` even for zero-length
-        // slices.
-        if self.len != 0 {
-            unsafe {
-                null_safe_slice(
-                    self.data,
-                    usize::try_from(self.len).expect("Buffer too long"),
-                )
-            }
-        } else {
-            &[]
-        }
+        unsafe { null_safe_slice(self.data, self.len) }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        usize::try_from(self.len).expect("Buffer too long")
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 
@@ -51,11 +50,8 @@ scoped_ptr!(ScopedSECItem, SECItem, destroy_secitem);
 impl ScopedSECItem {
     /// This dereferences the pointer held by the item and makes a copy of the
     /// content that is referenced there.
-    ///
-    /// # Safety
-    /// This dereferences two pointers.  It doesn't get much less safe.
     #[must_use]
-    pub unsafe fn into_vec(self) -> Vec<u8> {
+    pub fn into_vec(self) -> Vec<u8> {
         let b = unsafe { self.ptr.as_ref().expect("Null pointer") };
         // Sanity check the type, as some types don't count bytes in `Item::len`.
         assert_eq!(b.type_, SECItemType::siBuffer);
@@ -146,7 +142,7 @@ impl SECItemMut {
         Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: null_mut(),
+                data: ptr::null_mut(),
                 len: 0,
             },
         }
@@ -175,7 +171,7 @@ impl SECItemMut {
 /// Either hold the wrapper while the pointer is used:
 /// ```ignore
 /// let wrapper = SECItemBorrowed::wrap(&buf);
-/// unsafe { NSS_Function(ptr.as_ptr()) }
+/// unsafe { NSS_Function(wrapper.as_ptr()) }
 /// ```
 ///
 /// Or, create the wrapper as a temporary inside the same statement as the call:
@@ -199,8 +195,14 @@ pub struct SECItemBorrowed<T> {
 impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
     /// Return contents as a slice.
     #[must_use]
+    #[cfg(test)]
     pub fn as_slice(&self) -> &[u8] {
         unsafe { self.inner.as_slice() }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 
     /// Get a raw const pointer to the item.
@@ -224,7 +226,7 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
         SECItemBorrowed {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: null_mut(),
+                data: ptr::null_mut(),
                 len: 0,
             },
             phantom_data: PhantomData,
@@ -247,14 +249,15 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     /// [`wrap_mut`]: Self::wrap_mut
     #[must_use]
     pub fn wrap(buf: &'a [u8]) -> Self {
+        let data = if buf.is_empty() {
+            ptr::null_mut()
+        } else {
+            buf.as_ptr().cast_mut().cast()
+        };
         Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: if buf.is_empty() {
-                    null_mut()
-                } else {
-                    buf.as_ptr().cast_mut().cast()
-                },
+                data,
                 len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
             },
             phantom_data: PhantomData,
@@ -264,6 +267,7 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
 
 impl<'a> SECItemBorrowed<&'a mut [u8]> {
     /// Get a raw mut pointer to the item.
+    #[must_use]
     pub const fn as_mut_ptr(&mut self) -> *mut SECItem {
         &raw mut self.inner
     }
@@ -280,14 +284,15 @@ impl<'a> SECItemBorrowed<&'a mut [u8]> {
     /// If the slice is so large that it is longer than a `c_uint` can handle.
     #[must_use]
     pub fn wrap_mut(buf: &'a mut [u8]) -> Self {
+        let data = if buf.is_empty() {
+            ptr::null_mut()
+        } else {
+            buf.as_mut_ptr().cast()
+        };
         Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
-                data: if buf.is_empty() {
-                    null_mut()
-                } else {
-                    buf.as_mut_ptr().cast()
-                },
+                data,
                 len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
             },
             phantom_data: PhantomData,
@@ -338,11 +343,15 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
 mod tests {
     use super::{ParamItem, SECItemBorrowed};
 
-    const DATA: &[u8] = &[1, 2, 3, 4, 5];
+    const DATA: &[u8] = &[1, 2, 3];
 
     #[test]
     fn wrap_roundtrip() {
-        assert_eq!(SECItemBorrowed::wrap(DATA).as_slice(), DATA);
+        let item = SECItemBorrowed::wrap(DATA);
+        assert_eq!(item.as_slice(), DATA);
+        assert_eq!(item.len(), DATA.len());
+        assert_eq!(unsafe { (*item.as_ptr()).data }.cast_const(), DATA.as_ptr());
+
         assert!(SECItemBorrowed::wrap(&[]).as_slice().is_empty());
         assert!(SECItemBorrowed::make_empty().as_slice().is_empty());
         // An empty slice is normalised to null, matching `make_empty`.
@@ -357,19 +366,26 @@ mod tests {
     fn wrap_mut_roundtrip() {
         let mut buf = DATA.to_owned();
         let mut item = SECItemBorrowed::wrap_mut(&mut buf);
+        assert_eq!(item.len(), DATA.len(),);
         assert_eq!(item.as_slice(), DATA);
 
-        // Simulate an NSS in/out buffer: overwrite a prefix, then shorten `len`
-        // to the number of bytes actually written.
+        // Simulate writing to the SECItem and then truncating it.
         unsafe {
-            let raw = item.as_mut_ptr();
-            assert_eq!(usize::try_from((*raw).len).unwrap(), DATA.len());
-            (*raw).data.write(0xff);
-            (*raw).len = 1;
-        }
-        assert_eq!(item.as_slice(), &[0xff]);
-        drop(item);
-        assert_eq!(buf, [0xff, 2, 3, 4, 5]);
+            (*item.as_mut_ptr()).data.write(0xff);
+            (&mut *item.as_mut_ptr()).len = 2;
+        };
+        assert_eq!(item.len(), 2);
+        assert_eq!(item.as_slice(), &[0xff, 2]);
+        assert_eq!(&buf, &[0xff, 2, 3], "buf receives only the write");
+    }
+
+    /// An empty slice is null, no matter how it is created.
+    #[test]
+    fn wrap_empty() {
+        assert!(unsafe { (*SECItemBorrowed::make_empty().as_ptr()).data }.is_null());
+        assert!(unsafe { (*SECItemBorrowed::wrap(&[]).as_ptr()).data }.is_null());
+
+        assert!(unsafe { (*SECItemBorrowed::wrap_mut(&mut []).as_mut_ptr()).data }.is_null());
     }
 
     #[test]
