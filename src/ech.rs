@@ -15,7 +15,6 @@ use log::trace;
 use crate::{
     der,
     err::{Error, Res, ssl::SSL_ERROR_ECH_RETRY_WITH_ECH},
-    experimental_api,
     item::{SECItem, SECItemBorrowed, SECItemMut},
     null_safe_slice,
     p11::{

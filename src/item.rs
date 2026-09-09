@@ -9,7 +9,7 @@ use std::{marker::PhantomData, os::raw::c_uint, ptr::null_mut, slice::Iter};
 pub use crate::nss_prelude::{SECItem, SECItemArray, SECItemType};
 use crate::{
     nss_prelude::{PRBool, SECITEM_FreeArray, SECITEM_FreeItem},
-    null_safe_slice, scoped_ptr,
+    null_safe_slice,
 };
 
 impl SECItem {
@@ -153,6 +153,33 @@ impl SECItemMut {
 /// buffer and will not free it when dropped.
 ///
 /// This can be used to pass a reference to some borrowed rust memory to NSS.
+///
+/// Warning: avoid the following pattern:
+///
+/// ```ignore
+/// let ptr = SECItemBorrowed::wrap(&buf).as_ptr();
+/// unsafe { NSS_Function(ptr) };
+/// ```
+///
+/// The borrowed item is dropped on the first line, with the pointer now referencing
+/// freed memory.  Either hold the wrapper while the pointer is used:
+/// ```ignore
+/// let wrapper = SECItemBorrowed::wrap(&buf);
+/// unsafe { NSS_Function(ptr.as_ptr()) }
+/// ```
+///
+/// Or, put everything on the one line:
+/// ```ignore
+/// unsafe { NSS_Function(SECItemBorrowed::wrap(&buf).as_ptr()) }
+/// ```
+///
+/// Many NSS functions are not const-safe, so you might need to cast the pointer
+/// to turn it into `*mut SECItem` or, worse, `*mut c_void`:
+/// ```ignore
+/// let wrapper = SECItemBorrowed::wrap(&buf);
+/// unsafe { NSS_ConstUnsafeFn(wrapper.as_ptr().cast_mut()) };   // const_cast
+/// unsafe { NSS_VoidStar(wrapper.as_ptr().cast_mut().cast()) }; // `void*` arg
+/// ```
 #[repr(transparent)]
 pub struct SECItemBorrowed<T> {
     inner: SECItem,

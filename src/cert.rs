@@ -13,7 +13,7 @@ use std::{
 use log::error;
 
 use crate::{
-    Res, SECStatus, experimental_api,
+    Res, SECStatus,
     item::{SECItem, SECItemArray, ScopedSECItemArray, ScopedSECItemArrayIterator},
     null_safe_slice, p11,
     prio::PRFileDesc,

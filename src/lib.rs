@@ -6,24 +6,25 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[macro_use]
+mod err;
+#[macro_use]
+mod exp;
+#[macro_use]
+mod wrap;
+
 pub mod agent;
 mod agentio;
 mod auth;
 pub mod cert;
 pub mod constants;
 mod ech;
-#[macro_use]
-mod err;
-#[macro_use]
-mod exp;
 pub mod ext;
 #[cfg(all(not(feature = "disable-encryption"), feature = "blapi"))]
 pub(crate) mod freebl;
 pub mod hkdf;
 pub mod hp;
 mod item;
-#[macro_use]
-mod wrap;
 
 pub mod aead;
 pub mod der;
