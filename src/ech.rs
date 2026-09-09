@@ -7,7 +7,7 @@
 use std::{
     ffi::CString,
     os::raw::{c_char, c_uint},
-    ptr::{addr_of_mut, null_mut},
+    ptr::null_mut,
 };
 
 use log::trace;
@@ -103,7 +103,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     let params = der::object_id(oid_slc)?;
 
     let mut public_ptr: *mut SECKEYPublicKey = null_mut();
-    let mut param_item = SECItemBorrowed::wrap(&params);
+    let param_item = SECItemBorrowed::wrap(&params);
 
     // If we have tracing on, try to ensure that key data can be read.
     let insensitive_secret_ptr = if log::log_enabled!(log::Level::Trace) {
@@ -111,7 +111,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 CKM_EC_KEY_PAIR_GEN,
-                addr_of_mut!(param_item).cast(),
+                param_item.as_ptr().cast_mut().cast(),
                 &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
                 CKF_DERIVE,
@@ -128,7 +128,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 CKM_EC_KEY_PAIR_GEN,
-                addr_of_mut!(param_item).cast(),
+                param_item.as_ptr().cast_mut().cast(),
                 &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
                 CKF_DERIVE,
