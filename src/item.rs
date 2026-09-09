@@ -343,11 +343,19 @@ mod tests {
     fn wrap_mut_roundtrip() {
         let mut buf = DATA.to_owned();
         let mut item = SECItemBorrowed::wrap_mut(&mut buf);
-        assert_eq!(
-            usize::try_from(unsafe { (*item.as_mut_ptr()).len }).unwrap(),
-            DATA.len(),
-        );
         assert_eq!(item.as_slice(), DATA);
+
+        // Simulate an NSS in/out buffer: overwrite a prefix, then shorten `len`
+        // to the number of bytes actually written.
+        unsafe {
+            let raw = item.as_mut_ptr();
+            assert_eq!(usize::try_from((*raw).len).unwrap(), DATA.len());
+            (*raw).data.write(0xff);
+            (*raw).len = 1;
+        }
+        assert_eq!(item.as_slice(), &[0xff]);
+        drop(item);
+        assert_eq!(buf, [0xff, 2, 3, 4, 5]);
     }
 
     #[test]
