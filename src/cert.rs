@@ -12,9 +12,10 @@ use std::{
 
 use log::error;
 
+pub use crate::item::{ScopedSECItemArray, ScopedSECItemArrayIterator};
 use crate::{
     Res, SECStatus,
-    item::{SECItem, SECItemArray, ScopedSECItemArray, ScopedSECItemArrayIterator},
+    item::{SECItem, SECItemArray},
     null_safe_slice, p11,
     prio::PRFileDesc,
     ssl::{self, SSL_PeerSignedCertTimestamps, SSL_PeerStapledOCSPResponses},
