@@ -8,7 +8,7 @@ permissions: {}
 jobs:
   release:
     name: Update major version tag
-    uses: mozilla/actions/.github/workflows/release.yml@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+    uses: mozilla/actions/.github/workflows/release.yml@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
     permissions:
       contents: write # Required to update the major version tag
     with:
