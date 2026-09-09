@@ -7,8 +7,9 @@
 use std::{os::raw::c_int, ptr::null_mut};
 
 use crate::{
-    Error, SECItemBorrowed,
+    Error,
     hmac::HmacAlgorithm,
+    item::SECItemBorrowed,
     p11::{
         PK11_CreatePBEV2AlgorithmID, PK11_PBEKeyGen, PRBool, SECOID_DestroyAlgorithmID, SECOidTag,
         Slot, SymKey,
@@ -34,10 +35,10 @@ pub fn pbkdf2(
     let iterations = c_int::try_from(iterations)?;
     let key_len_int = c_int::try_from(key_len)?;
 
-    let salt_item = SECItemBorrowed::wrap(salt)?;
+    let salt_item = SECItemBorrowed::wrap(salt);
 
     let slot = Slot::internal()?;
-    let pw_item = SECItemBorrowed::wrap(password)?;
+    let pw_item = SECItemBorrowed::wrap(password);
 
     let algid = unsafe {
         PK11_CreatePBEV2AlgorithmID(

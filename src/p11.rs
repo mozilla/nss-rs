@@ -20,8 +20,9 @@ use std::{
 
 use crate::{
     err::{Error, Res, secstatus_to_res},
+    item::SECItemMut,
     nss_prelude::SECITEM_FreeItem,
-    util::SECItemMut,
+    null_safe_slice,
 };
 
 #[must_use]
@@ -54,8 +55,6 @@ mod nss_p11 {
 }
 
 pub use nss_p11::*;
-
-use crate::null_safe_slice;
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
 scoped_ptr!(CertList, CERTCertList, CERT_DestroyCertList);

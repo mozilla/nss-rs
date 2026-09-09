@@ -18,9 +18,10 @@ pub use recprot::AEAD_NULL_TAG;
 pub use recprot::RecordProtection;
 
 use crate::{
-    Cipher, SECItemBorrowed, SymKey,
+    Cipher, SymKey,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
+    item::SECItemBorrowed,
     p11::{
         self, CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE, CKA_DECRYPT, CKA_ENCRYPT, CKA_NSS_MESSAGE,
         CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305, Context,
@@ -252,7 +253,7 @@ impl Aead {
     pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
         let slot = p11::Slot::internal()?;
 
-        let key_item = SECItemBorrowed::wrap(key)?;
+        let key_item = SECItemBorrowed::wrap(key);
         let ptr = unsafe {
             p11::PK11_ImportSymKey(
                 *slot,
@@ -279,7 +280,7 @@ impl Aead {
                 algorithm.p11_mech(),
                 mode.p11mode(),
                 **key,
-                SECItemBorrowed::wrap(&nonce_base[..])?.as_ptr(),
+                SECItemBorrowed::wrap(&nonce_base[..]).as_ptr(),
             )
         };
         Ok(Self {

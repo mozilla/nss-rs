@@ -6,69 +6,11 @@
 
 use std::{marker::PhantomData, os::raw::c_uint, ptr::null_mut, slice::Iter};
 
-use crate::{Res, nss_prelude::*, null_safe_slice};
-
-/// Implement a smart pointer for NSS objects.
-///
-/// Most of the time the pointer is like a `Box`, but there are exceptions (e.g.
-/// `PK11SymKey` is internally reference counted so its pointer is like an `Arc`.)
-///
-/// Named "scoped" because that is what NSS calls its `unique_ptr` typedefs.
-#[macro_export]
-macro_rules! scoped_ptr {
-    ($name:ident, $target:ty, $dtor:path) => {
-        pub struct $name {
-            ptr: *mut $target,
-        }
-
-        impl $name {
-            /// Create a new instance of `$name` from a pointer.
-            ///
-            /// # Errors
-            /// When passed a null pointer generates an error.
-            pub fn from_ptr(raw: *mut $target) -> Result<Self, $crate::err::Error> {
-                let ptr = $crate::err::into_result(raw)?;
-                Ok(Self { ptr })
-            }
-        }
-
-        impl $crate::err::IntoResult for *mut $target {
-            type Ok = $name;
-
-            fn into_result(self) -> Result<Self::Ok, $crate::err::Error> {
-                $name::from_ptr(self)
-            }
-        }
-
-        impl std::ops::Deref for $name {
-            type Target = *mut $target;
-
-            fn deref(&self) -> &*mut $target {
-                &self.ptr
-            }
-        }
-
-        // Original implements DerefMut, but is that really a good idea?
-
-        impl Drop for $name {
-            fn drop(&mut self) {
-                unsafe { _ = $dtor(self.ptr) };
-            }
-        }
-    };
-}
-
-macro_rules! impl_clone {
-    ($name:ty, $nss_fn:path) => {
-        impl Clone for $name {
-            fn clone(&self) -> Self {
-                let ptr = unsafe { $nss_fn(self.ptr) };
-                assert!(!ptr.is_null());
-                Self { ptr }
-            }
-        }
-    };
-}
+pub use crate::nss_prelude::{SECItem, SECItemArray, SECItemType};
+use crate::{
+    nss_prelude::{PRBool, SECITEM_FreeArray, SECITEM_FreeItem},
+    null_safe_slice, scoped_ptr,
+};
 
 impl SECItem {
     /// Return contents as a slice.
@@ -130,7 +72,6 @@ unsafe fn destroy_secitem_array(array: *mut SECItemArray) {
 }
 scoped_ptr!(ScopedSECItemArray, SECItemArray, destroy_secitem_array);
 
-#[expect(clippy::into_iter_without_iter)]
 impl<'a> IntoIterator for &'a ScopedSECItemArray {
     type Item = &'a [u8];
     type IntoIter = ScopedSECItemArrayIterator<'a>;
@@ -211,8 +152,7 @@ impl SECItemMut {
 /// `SECItem` may be allocated either by Rust or NSS. The `SECItem` does not own the
 /// buffer and will not free it when dropped.
 ///
-/// This is usually used to pass a reference to some borrowed rust memory to
-/// NSS. It is occasionally used to accept non-owned output data from NSS.
+/// This can be used to pass a reference to some borrowed rust memory to NSS.
 #[repr(transparent)]
 pub struct SECItemBorrowed<T> {
     inner: SECItem,
@@ -266,16 +206,19 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     /// const also, something that the C code does not ensure, because `SECItem.data`
     /// is a plain `unsigned char*` rather than a `const unsigned char*`.
     ///
+    /// # Panics
+    /// If the slice is so large that it is longer than a `c_uint` can handle.
+    ///
     /// [`wrap_mut`]: Self::wrap_mut
-    pub fn wrap(buf: &'a [u8]) -> Res<Self> {
-        Ok(Self {
+    pub fn wrap(buf: &'a [u8]) -> Self {
+        Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
                 data: buf.as_ptr().cast_mut().cast(),
-                len: c_uint::try_from(buf.len())?,
+                len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
             },
             phantom_data: PhantomData,
-        })
+        }
     }
 }
 
@@ -292,34 +235,52 @@ impl<'a> SECItemBorrowed<&'a mut [u8]> {
     /// but this is not safe if those functions free or reallocate the memory.
     /// This has to be restricted to those functions that limit their actions to
     /// writing to the memory they are provided.
-    pub fn wrap_mut(buf: &'a mut [u8]) -> Res<Self> {
-        Ok(Self {
+    ///
+    /// # Panics
+    /// If the slice is so large that it is longer than a `c_uint` can handle.
+    pub fn wrap_mut(buf: &'a mut [u8]) -> Self {
+        Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
                 data: buf.as_mut_ptr().cast(),
-                len: c_uint::try_from(buf.len())?,
+                len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
             },
             phantom_data: PhantomData,
-        })
+        }
     }
 }
 
+/// A `SECItem` that borrows a struct, for passing PKCS#11 mechanism parameters.
+///
+/// Creating this object is safe, but using it is dangerous in the same way as
+/// [`SECItemBorrowed::wrap`]: the resulting `SECItem` can only be passed to
+/// functions that treat the referenced struct as `const`.  Writing through the
+/// pointer is undefined behaviour, because the struct is only shared-borrowed.
+///
+/// Note that NSS has a habit of taking `SECItem*` or `void*` as parameter
+/// arguments.  In those cases, this will need a call to `as_ptr().cast_mut()`,
+/// possibly chained to `.cast()`.
+#[repr(transparent)]
 pub struct ParamItem<'a, T> {
     inner: SECItem,
     marker: PhantomData<&'a T>,
 }
 
 impl<'a, T: Sized + 'a> ParamItem<'a, T> {
-    pub fn wrap(v: &'a T) -> Res<Self> {
+    /// Wrap a struct in a `SECItem` for use as a parameter.
+    ///
+    /// # Panics
+    /// If the slice is so large that it is longer than a `c_uint` can handle.
+    pub fn wrap(v: &'a T) -> Self {
         let p: *const T = &raw const *v;
-        Ok(Self {
+        Self {
             inner: SECItem {
                 type_: SECItemType::siBuffer,
                 data: p.cast_mut().cast(),
-                len: c_uint::try_from(size_of::<T>())?,
+                len: c_uint::try_from(size_of::<T>()).expect("struct is crazy big"),
             },
             marker: PhantomData,
-        })
+        }
     }
 
     /// Get a raw const pointer to the item.

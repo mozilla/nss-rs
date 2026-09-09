@@ -13,9 +13,11 @@ use std::{
 use log::trace;
 
 use crate::{
-    SECItem, SECItemBorrowed, SECItemMut, der,
+    der,
     err::{Error, Res, ssl::SSL_ERROR_ECH_RETRY_WITH_ECH},
-    experimental_api, null_safe_slice,
+    experimental_api,
+    item::{SECItem, SECItemBorrowed, SECItemMut},
+    null_safe_slice,
     p11::{
         self, CKF_DERIVE, CKM_EC_KEY_PAIR_GEN, PrivateKey, PublicKey, SECKEYPrivateKey,
         SECKEYPublicKey, Slot,
@@ -102,7 +104,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     let params = der::object_id(oid_slc)?;
 
     let mut public_ptr: *mut SECKEYPublicKey = null_mut();
-    let mut param_item = SECItemBorrowed::wrap(&params)?;
+    let mut param_item = SECItemBorrowed::wrap(&params);
 
     // If we have tracing on, try to ensure that key data can be read.
     let insensitive_secret_ptr = if log::log_enabled!(log::Level::Trace) {

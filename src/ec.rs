@@ -9,9 +9,10 @@ use std::ptr;
 // use std::ptr::null;
 // use std::ptr::null_mut;
 use crate::{
-    PrivateKey, PublicKey, SECItemBorrowed, der,
+    PrivateKey, PublicKey, der,
     err::{Error, IntoResult as _, secstatus_to_res},
     init,
+    item::{SECItemBorrowed, SECItemMut, ScopedSECItem},
     p11::{
         CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CKA_SIGN, CKA_VALUE, CKD_NULL,
         CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN, CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
@@ -22,7 +23,6 @@ use crate::{
         SECKEY_DecodeDERSubjectPublicKeyInfo, Slot,
     },
     ssl::PRBool,
-    util::SECItemMut,
 };
 //
 // Constants
@@ -120,7 +120,7 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
     // Get the OID for the Curve
     let curve_oid = ec_curve_to_oid(curve);
     let oid_bytes = der::object_id(&curve_oid)?;
-    let oid = SECItemBorrowed::wrap(&oid_bytes)?;
+    let oid = SECItemBorrowed::wrap(&oid_bytes);
     let oid_ptr = oid.as_ptr();
 
     // Get the Mechanism based on the Curve and its use
@@ -159,7 +159,7 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
 pub fn export_ec_private_key_pkcs8(key: &PrivateKey) -> Result<Vec<u8>, Error> {
     init()?;
     unsafe {
-        let sk: crate::ScopedSECItem =
+        let sk: ScopedSECItem =
             PK11_ExportDERPrivateKeyInfo(**key, ptr::null_mut()).into_result()?;
         Ok(sk.into_vec())
     }
@@ -167,7 +167,7 @@ pub fn export_ec_private_key_pkcs8(key: &PrivateKey) -> Result<Vec<u8>, Error> {
 
 pub fn import_ec_public_key_from_spki(spki: &[u8]) -> Result<PublicKey, Error> {
     init()?;
-    let spki_item = SECItemBorrowed::wrap(spki)?;
+    let spki_item = SECItemBorrowed::wrap(spki);
     let spki_item_ptr = spki_item.as_ptr();
     let slot = Slot::internal()?;
     unsafe {
@@ -190,7 +190,7 @@ pub fn import_ec_private_key_pkcs8(pki: &[u8]) -> Result<PrivateKey, Error> {
 
     // Get the PKCS11 slot
     let slot = Slot::internal()?;
-    let der_pki = SECItemBorrowed::wrap(pki)?;
+    let der_pki = SECItemBorrowed::wrap(pki);
 
     // Create a pointer for the private key
     let mut pk_ptr = ptr::null_mut();
@@ -262,8 +262,8 @@ pub fn sign(
     init()?;
     let mut data_signature = vec![0u8; 0x40];
 
-    let data_to_sign = SECItemBorrowed::wrap(data)?;
-    let mut signature = SECItemBorrowed::wrap_mut(&mut data_signature)?;
+    let data_to_sign = SECItemBorrowed::wrap(data);
+    let mut signature = SECItemBorrowed::wrap_mut(&mut data_signature);
     unsafe {
         secstatus_to_res(crate::p11::PK11_SignWithMechanism(
             private_key.as_mut().ok_or(Error::InvalidInput)?,
@@ -294,8 +294,8 @@ pub fn verify(
 ) -> Result<bool, Error> {
     init()?;
     unsafe {
-        let data_to_sign = SECItemBorrowed::wrap(data)?;
-        let signature = SECItemBorrowed::wrap(signature)?;
+        let data_to_sign = SECItemBorrowed::wrap(data);
+        let signature = SECItemBorrowed::wrap(signature);
 
         let rv = crate::p11::PK11_VerifyWithMechanism(
             public_key.as_mut().ok_or(Error::InvalidInput)?,

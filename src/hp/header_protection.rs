@@ -14,10 +14,10 @@ use std::{
 
 use super::{SAMPLE_SIZE, SSL_HkdfExpandLabelWithMech};
 use crate::{
-    ParamItem, SECItemBorrowed,
     aead::AeadAlgorithms,
     constants::{Cipher, Version},
     err::{Error, Res, secstatus_to_res},
+    item::{ParamItem, SECItemBorrowed},
     p11::{
         CK_CHACHA20_PARAMS, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, Context, PK11_CipherOp,
         PK11_CreateContextBySymKey, PK11_Encrypt, PK11_GetBlockSize, PK11SymKey, SymKey,
@@ -134,7 +134,7 @@ impl Key {
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;
-                let param_item = ParamItem::wrap(&params)?;
+                let param_item = ParamItem::wrap(&params);
                 secstatus_to_res(unsafe {
                     PK11_Encrypt(
                         **key,

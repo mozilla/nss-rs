@@ -13,8 +13,8 @@ use std::{
 use log::error;
 
 use crate::{
-    Res, SECItem, SECItemArray, ScopedSECItemArray, ScopedSECItemArrayIterator, experimental_api,
-    nss_prelude::SECStatus,
+    Res, SECStatus, experimental_api,
+    item::{SECItem, SECItemArray, ScopedSECItemArray, ScopedSECItemArrayIterator},
     null_safe_slice, p11,
     prio::PRFileDesc,
     ssl::{self, SSL_PeerSignedCertTimestamps, SSL_PeerStapledOCSPResponses},
