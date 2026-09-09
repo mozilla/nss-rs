@@ -178,7 +178,7 @@ impl SECItemMut {
 /// unsafe { NSS_Function(ptr.as_ptr()) }
 /// ```
 ///
-/// Or, put everything on the one line:
+/// Or, create the wrapper as a temporary inside the same statement as the call:
 /// ```ignore
 /// unsafe { NSS_Function(SECItemBorrowed::wrap(&buf).as_ptr()) }
 /// ```
