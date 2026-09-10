@@ -6,7 +6,7 @@
 
 use std::{os::raw::c_char, str::Utf8Error};
 
-use crate::nss_prelude::*;
+use crate::{hkdf::HkdfError, nss_prelude::*};
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 #[expect(non_snake_case, dead_code, reason = "Code is bindgen-generated.")]
@@ -15,7 +15,6 @@ mod codes {
     include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
 }
 pub use codes::{SECErrorCodes as sec, SSLErrorCodes as ssl};
-use thiserror::Error;
 
 #[expect(dead_code, reason = "Code is bindgen-generated.")]
 pub mod nspr {
@@ -52,7 +51,7 @@ pub mod mozpkix {
 
 pub type Res<T> = Result<T, Error>;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, thiserror::Error)]
 pub enum Error {
     #[error("AEAD error")]
     Aead,
@@ -71,7 +70,7 @@ pub enum Error {
     #[error("ECH error, retry needed")]
     EchRetry(Vec<u8>),
     #[error("HKDF error")]
-    Hkdf,
+    Hkdf(#[from] HkdfError),
     #[error("Internal error")]
     Internal,
     #[error("Integer overflow")]
@@ -102,6 +101,8 @@ pub enum Error {
     String,
     #[error("Time travel detected")]
     TimeTravel,
+    #[error("Unknown or unsupported identifier")]
+    UnknownIdentifier,
     #[error("Unsupported cipher")]
     UnsupportedCipher,
     #[error("Unsupported curve")]

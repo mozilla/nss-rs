@@ -18,9 +18,10 @@ pub use recprot::AEAD_NULL_TAG;
 pub use recprot::RecordProtection;
 
 use crate::{
-    Cipher, SECItemBorrowed, SymKey,
+    Cipher, SymKey,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
+    item::SECItemBorrowed,
     p11::{
         self, CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE, CKA_DECRYPT, CKA_ENCRYPT, CKA_NSS_MESSAGE,
         CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305, Context,
@@ -214,7 +215,7 @@ pub enum AeadAlgorithms {
 
 impl AeadAlgorithms {
     #[must_use]
-    pub const fn key_len(self) -> c_uint {
+    pub const fn key_len(self) -> usize {
         match self {
             Self::Aes128Gcm => 16,
             Self::Aes256Gcm | Self::ChaCha20Poly1305 => 32,
@@ -250,18 +251,16 @@ pub struct Aead {
 
 impl Aead {
     pub fn import_key(algorithm: AeadAlgorithms, key: &[u8]) -> Result<SymKey, Error> {
-        let slot = p11::Slot::internal().map_err(|_| Error::Internal)?;
+        let slot = p11::Slot::internal()?;
 
-        let key_item = SECItemBorrowed::wrap(key)?;
-        let key_item_ptr = std::ptr::from_ref(key_item.as_ref()).cast_mut();
-
+        let key_item = SECItemBorrowed::wrap(key);
         let ptr = unsafe {
             p11::PK11_ImportSymKey(
                 *slot,
                 algorithm.p11_mech(),
                 p11::PK11Origin::PK11_OriginUnwrap,
                 CKA_ENCRYPT | CKA_DECRYPT,
-                key_item_ptr,
+                key_item.as_ptr().cast_mut(), // const_cast!
                 null_mut(),
             )
         };
@@ -281,7 +280,7 @@ impl Aead {
                 algorithm.p11_mech(),
                 mode.p11mode(),
                 **key,
-                SECItemBorrowed::wrap(&nonce_base[..])?.as_ref(),
+                SECItemBorrowed::wrap(&nonce_base[..]).as_ptr(),
             )
         };
         Ok(Self {

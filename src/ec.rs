@@ -6,30 +6,29 @@
 
 use std::ptr;
 
-// use std::ptr::null;
-// use std::ptr::null_mut;
+use log::trace;
+
 use crate::{
-    PrivateKey, PublicKey, SECItem, SECItemBorrowed, der,
-    err::{Error, IntoResult as _, secstatus_to_res},
+    PrivateKey, PublicKey, Res, der,
+    err::{Error, IntoResult as _, sec::SEC_ERROR_BAD_SIGNATURE, secstatus_to_res},
     init,
+    item::{SECItemBorrowed, SECItemMut, ScopedSECItem},
+    null_safe_slice,
     p11::{
-        CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CKA_SIGN, CKA_VALUE, CKD_NULL,
-        CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN, CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
-        CKM_ECDH1_DERIVE, CKM_ECDSA, CKM_EDDSA, CKM_SHA512_HMAC, KU_ALL,
-        PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPair,
+        self, CK_FLAGS, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CKA_DERIVE, CKA_VALUE, CKD_NULL,
+        CKF_DERIVE, CKF_SIGN, CKF_VERIFY, CKM_EC_EDWARDS_KEY_PAIR_GEN, CKM_EC_KEY_PAIR_GEN,
+        CKM_EC_MONTGOMERY_KEY_PAIR_GEN, CKM_ECDH1_DERIVE, CKM_ECDSA, CKM_EDDSA, CKM_SHA512_HMAC,
+        KU_ALL, PK11_ATTR_INSENSITIVE, PK11_ATTR_PRIVATE, PK11_ATTR_PUBLIC, PK11_ATTR_SENSITIVE,
+        PK11_ATTR_SESSION, PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPairWithOpFlags,
         PK11_ImportDERPrivateKeyInfoAndReturnKey, PK11_ImportPublicKey, PK11_PubDeriveWithKDF,
         PK11_ReadRawAttribute, PK11ObjectType::PK11_TypePrivKey,
-        SECKEY_DecodeDERSubjectPublicKeyInfo, Slot,
+        SECKEY_DecodeDERSubjectPublicKeyInfo, SECOidTag, Slot,
     },
     ssl::PRBool,
-    util::SECItemMut,
 };
-//
-// Constants
-//
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EcCurve {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Curve {
     P256,
     P384,
     P521,
@@ -37,144 +36,149 @@ pub enum EcCurve {
     Ed25519,
 }
 
-pub type EcdhPublicKey = PublicKey;
-pub type EcdhPrivateKey = PrivateKey;
+impl Curve {
+    #[must_use]
+    pub const fn can_sign(self) -> bool {
+        matches!(self, Self::P256 | Self::P384 | Self::P521 | Self::Ed25519)
+    }
+
+    #[must_use]
+    pub const fn can_ecdh(self) -> bool {
+        matches!(self, Self::P256 | Self::P384 | Self::P521 | Self::X25519)
+    }
+
+    const fn to_mechanism(self) -> CK_MECHANISM_TYPE {
+        match self {
+            Self::P256 | Self::P384 | Self::P521 => CKM_EC_KEY_PAIR_GEN,
+            Self::Ed25519 => CKM_EC_EDWARDS_KEY_PAIR_GEN,
+            Self::X25519 => CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+        }
+    }
+
+    fn get_oid(self) -> Res<Vec<u8>> {
+        let oid_tag = SECOidTag::Type::from(self);
+        let oid_data_ptr = unsafe { p11::SECOID_FindOIDByTag(oid_tag) }.into_result()?;
+        let oid_data = unsafe { &*oid_data_ptr };
+        let oid_bytes = unsafe { null_safe_slice(oid_data.oid.data, oid_data.oid.len) };
+        der::object_id(oid_bytes)
+    }
+}
+
+impl From<Curve> for SECOidTag::Type {
+    fn from(v: Curve) -> Self {
+        match v {
+            Curve::X25519 => SECOidTag::SEC_OID_X25519,
+            Curve::Ed25519 => SECOidTag::SEC_OID_ED25519_SIGNATURE,
+            Curve::P256 => SECOidTag::SEC_OID_ANSIX962_EC_PRIME256V1,
+            Curve::P384 => SECOidTag::SEC_OID_SECG_EC_SECP384R1,
+            Curve::P521 => SECOidTag::SEC_OID_SECG_EC_SECP521R1,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
-pub struct EcdhKeypair {
-    pub public: EcdhPublicKey,
-    pub private: EcdhPrivateKey,
+pub struct Keypair {
+    pub public: PublicKey,
+    pub private: PrivateKey,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Ecdh(EcCurve);
-
-impl Ecdh {
-    #[must_use]
-    pub const fn new(curve: EcCurve) -> Self {
-        Self(curve)
-    }
-
-    pub fn generate_keypair(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
-        ecdh_keygen(curve)
-    }
-}
-
-// Object identifiers in DER tag-length-value form
-pub const OID_EC_PUBLIC_KEY_BYTES: &[u8] = &[
-    /* RFC 5480 (id-ecPublicKey) */
-    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
-];
-
-/// OID per RFC 5480 (secp256r1)
-pub const OID_SECP256R1_BYTES: &[u8] = &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
-
-/// OID per RFC 5480 (secp384r1)
-pub const OID_SECP384R1_BYTES: &[u8] = &[0x2b, 0x81, 0x04, 0x00, 0x22];
-
-/// OID per RFC 5480 (secp521r1)
-pub const OID_SECP521R1_BYTES: &[u8] = &[0x2b, 0x81, 0x04, 0x00, 0x23];
-
-pub const OID_ED25519_BYTES: &[u8] = &[/* RFC 8410 (id-ed25519) */ 0x2b, 0x65, 0x70];
-pub const OID_RS256_BYTES: &[u8] = &[
-    /* RFC 4055 (sha256WithRSAEncryption) */
-    0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b,
-];
-
-pub const OID_X25519_BYTES: &[u8] = &[
-    /* https://tools.ietf.org/html/draft-josefsson-pkix-newcurves-01
-     * 1.3.6.1.4.1.11591.15.1 */
-    0x2b, 0x06, 0x01, 0x04, 0x01, 0xDA, 0x47, 0x0F, 0x01,
-];
-
-#[deprecated = "use der::object_id"]
-pub fn object_id(val: &[u8]) -> Result<Vec<u8>, Error> {
-    der::object_id(val)
-}
-
-fn ec_curve_to_oid(alg: &EcCurve) -> Vec<u8> {
-    match alg {
-        EcCurve::X25519 => OID_X25519_BYTES.to_vec(),
-        EcCurve::Ed25519 => OID_ED25519_BYTES.to_vec(),
-        EcCurve::P256 => OID_SECP256R1_BYTES.to_vec(),
-        EcCurve::P384 => OID_SECP384R1_BYTES.to_vec(),
-        EcCurve::P521 => OID_SECP521R1_BYTES.to_vec(),
-    }
-}
-
-const fn ec_curve_to_ckm(alg: &EcCurve) -> CK_MECHANISM_TYPE {
-    match alg {
-        EcCurve::P256 | EcCurve::P384 | EcCurve::P521 => CKM_EC_KEY_PAIR_GEN,
-        EcCurve::Ed25519 => CKM_EC_EDWARDS_KEY_PAIR_GEN,
-        EcCurve::X25519 => CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
-    }
-}
-
-//
-// Curve functions
-//
-
-pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
+fn ec_keygen(curve: Curve, flags: CK_FLAGS, sensitive: bool) -> Res<Keypair> {
     init()?;
 
     // Get the OID for the Curve
-    let curve_oid = ec_curve_to_oid(curve);
-    let oid_bytes = der::object_id(&curve_oid)?;
-    let mut oid = SECItemBorrowed::wrap(&oid_bytes)?;
-    let oid_ptr: *mut SECItem = oid.as_mut();
+    let oid_bytes = curve.get_oid()?;
+    let oid = SECItemBorrowed::wrap(&oid_bytes);
 
-    // Get the Mechanism based on the Curve and its use
-    let ckm = ec_curve_to_ckm(curve);
+    let mech = curve.to_mechanism();
+    let attrs = PK11_ATTR_SESSION
+        | if sensitive {
+            PK11_ATTR_SENSITIVE | PK11_ATTR_PRIVATE
+        } else {
+            PK11_ATTR_INSENSITIVE | PK11_ATTR_PUBLIC
+        };
 
     // Get the PKCS11 slot
     let slot = Slot::internal()?;
 
     // Create a pointer for the public key
-    let mut pk_ptr = ptr::null_mut();
-
-    // https://github.com/mozilla/nss-gk-api/issues/1
-    unsafe {
-        let sk = PK11_GenerateKeyPair(
+    let mut public_ptr = ptr::null_mut();
+    let secret_ptr = unsafe {
+        PK11_GenerateKeyPairWithOpFlags(
             *slot,
-            ckm,
-            oid_ptr.cast(),
-            &raw mut pk_ptr,
-            PRBool::from(false),
-            PRBool::from(false),
+            mech,
+            oid.as_ptr().cast_mut().cast(), // void* cast
+            &raw mut public_ptr,
+            attrs,
+            flags,
+            flags,
             ptr::null_mut(),
         )
-        .into_result()?;
+    };
+    assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
 
-        let pk = EcdhPublicKey::from_ptr(pk_ptr)?;
+    let sk = PrivateKey::from_ptr(secret_ptr)?;
+    let pk = PublicKey::from_ptr(public_ptr)?;
+    trace!("Generated key pair: sk={sk:?} pk={pk:?}");
 
-        let kp = EcdhKeypair {
-            public: pk,
-            private: sk,
-        };
-
-        Ok(kp)
-    }
+    Ok(Keypair {
+        public: pk,
+        private: sk,
+    })
 }
 
-pub fn export_ec_private_key_pkcs8(key: &PrivateKey) -> Result<Vec<u8>, Error> {
-    init()?;
-    unsafe {
-        let sk: crate::ScopedSECItem =
-            PK11_ExportDERPrivateKeyInfo(**key, ptr::null_mut()).into_result()?;
-        Ok(sk.into_vec())
+pub fn ecdh_keygen(curve: Curve) -> Res<Keypair> {
+    if !curve.can_ecdh() {
+        // TODO: use bool::ok_or when MSRV hits 1.98
+        return Err(Error::UnsupportedCurve);
     }
+    ec_keygen(curve, CK_FLAGS::from(CKF_DERIVE), true)
 }
 
-pub fn import_ec_public_key_from_spki(spki: &[u8]) -> Result<PublicKey, Error> {
+pub fn ecdsa_keygen(curve: Curve) -> Res<Keypair> {
+    if !curve.can_sign() {
+        return Err(Error::UnsupportedCurve);
+    }
+    ec_keygen(curve, CK_FLAGS::from(CKF_SIGN | CKF_VERIFY), true)
+}
+
+/// Ed25519 keygen in NSS is identical to ECDSA keygen, so this is
+/// just an alias for [`ecdsa_keygen`].
+pub use ecdsa_keygen as eddsa_keygen;
+
+pub fn ecdh_keygen_extractable(curve: Curve) -> Res<Keypair> {
+    if !curve.can_ecdh() {
+        return Err(Error::UnsupportedCurve);
+    }
+    ec_keygen(curve, CK_FLAGS::from(CKF_DERIVE), false)
+}
+
+pub fn ecdsa_keygen_extractable(curve: Curve) -> Res<Keypair> {
+    if !curve.can_sign() {
+        return Err(Error::UnsupportedCurve);
+    }
+    ec_keygen(curve, CK_FLAGS::from(CKF_SIGN | CKF_VERIFY), false)
+}
+
+/// Ed25519 keygen in NSS is identical to ECDSA keygen, so this is
+/// just an alias for [`ecdsa_keygen`].
+pub use ecdsa_keygen_extractable as eddsa_keygen_extractable;
+
+pub fn export_pkcs8(key: &PrivateKey) -> Res<Vec<u8>> {
     init()?;
-    let mut spki_item = SECItemBorrowed::wrap(spki)?;
-    let spki_item_ptr = spki_item.as_mut();
+    let sk: ScopedSECItem =
+        unsafe { PK11_ExportDERPrivateKeyInfo(**key, ptr::null_mut()) }.into_result()?;
+    Ok(sk.into_vec())
+}
+
+pub fn import_spki(spki: &[u8]) -> Res<PublicKey> {
+    init()?;
+    let spki_item = SECItemBorrowed::wrap(spki);
+    let spki_item_ptr = spki_item.as_ptr();
     let slot = Slot::internal()?;
     unsafe {
         let spki = SECKEY_DecodeDERSubjectPublicKeyInfo(spki_item_ptr).into_result()?;
-        let pk: PublicKey =
-            crate::p11::SECKEY_ExtractPublicKey(spki.as_mut().ok_or(Error::InvalidInput)?)
-                .into_result()?;
+        let pk: PublicKey = p11::SECKEY_ExtractPublicKey(spki.as_mut().ok_or(Error::InvalidInput)?)
+            .into_result()?;
 
         let handle = PK11_ImportPublicKey(*slot, *pk, PRBool::from(false));
         if handle == CK_INVALID_HANDLE {
@@ -185,21 +189,20 @@ pub fn import_ec_public_key_from_spki(spki: &[u8]) -> Result<PublicKey, Error> {
     }
 }
 
-pub fn import_ec_private_key_pkcs8(pki: &[u8]) -> Result<PrivateKey, Error> {
+pub fn import_pkcs8(pki: &[u8]) -> Res<PrivateKey> {
     init()?;
 
     // Get the PKCS11 slot
     let slot = Slot::internal()?;
-    let mut der_pki = SECItemBorrowed::wrap(pki)?;
-    let der_pki_ptr: *mut SECItem = der_pki.as_mut();
+    let der_pki = SECItemBorrowed::wrap(pki);
 
     // Create a pointer for the private key
     let mut pk_ptr = ptr::null_mut();
 
-    unsafe {
-        secstatus_to_res(PK11_ImportDERPrivateKeyInfoAndReturnKey(
+    secstatus_to_res(unsafe {
+        PK11_ImportDERPrivateKeyInfoAndReturnKey(
             *slot,
-            der_pki_ptr,
+            der_pki.as_ptr().cast_mut(), // const_cast!
             ptr::null_mut(),
             ptr::null_mut(),
             0,
@@ -207,14 +210,13 @@ pub fn import_ec_private_key_pkcs8(pki: &[u8]) -> Result<PrivateKey, Error> {
             KU_ALL,
             &raw mut pk_ptr,
             ptr::null_mut(),
-        ))?;
+        )
+    })?;
 
-        let sk = EcdhPrivateKey::from_ptr(pk_ptr)?;
-        Ok(sk)
-    }
+    PrivateKey::from_ptr(pk_ptr)
 }
 
-pub fn export_ec_private_key_from_raw(key: &PrivateKey) -> Result<Vec<u8>, Error> {
+pub fn export_raw(key: &PrivateKey) -> Res<Vec<u8>> {
     init()?;
     let mut key_item = SECItemMut::make_empty();
     secstatus_to_res(unsafe {
@@ -223,18 +225,18 @@ pub fn export_ec_private_key_from_raw(key: &PrivateKey) -> Result<Vec<u8>, Error
     Ok(key_item.as_slice().to_owned())
 }
 
-pub fn ecdh(sk: &PrivateKey, pk: &PublicKey) -> Result<Vec<u8>, Error> {
+pub fn ecdh(sk: &PrivateKey, pk: &PublicKey) -> Res<Vec<u8>> {
     init()?;
     let sym_key = unsafe {
         PK11_PubDeriveWithKDF(
-            sk.cast(),
-            pk.cast(),
+            **sk,
+            **pk,
             0,
             ptr::null_mut(),
             ptr::null_mut(),
             CKM_ECDH1_DERIVE,
-            CKM_SHA512_HMAC,
-            CKA_SIGN,
+            CKM_SHA512_HMAC, // not used
+            CKA_DERIVE,
             0,
             CKD_NULL,
             ptr::null_mut(),
@@ -247,77 +249,84 @@ pub fn ecdh(sk: &PrivateKey, pk: &PublicKey) -> Result<Vec<u8>, Error> {
     Ok(key.to_vec())
 }
 
-pub fn convert_to_public(sk: &PrivateKey) -> Result<PublicKey, Error> {
+pub fn convert_to_public(sk: &PrivateKey) -> Res<PublicKey> {
     init()?;
     unsafe {
-        let pk = crate::p11::SECKEY_ConvertToPublicKey(**sk).into_result()?;
+        let pk = p11::SECKEY_ConvertToPublicKey(**sk).into_result()?;
         Ok(pk)
     }
 }
 
-pub fn sign(
-    private_key: &PrivateKey,
-    data: &[u8],
-    mechanism: CK_MECHANISM_TYPE,
-) -> Result<Vec<u8>, Error> {
+fn sign(private_key: &PrivateKey, data: &[u8], mechanism: CK_MECHANISM_TYPE) -> Res<Vec<u8>> {
     init()?;
-    let data_signature = vec![0u8; 0x40];
 
-    let mut data_to_sign = SECItemBorrowed::wrap(data)?;
-    let mut signature = SECItemBorrowed::wrap(&data_signature)?;
-    unsafe {
-        secstatus_to_res(crate::p11::PK11_SignWithMechanism(
-            private_key.as_mut().ok_or(Error::InvalidInput)?,
+    // The buffer has to be exactly the right size: Ed25519 rejects anything else.
+    let expected_len = usize::try_from(unsafe { p11::PK11_SignatureLen(**private_key) })
+        .map_err(|_| Error::InvalidInput)?;
+    if expected_len == 0 {
+        return Err(Error::InvalidInput);
+    }
+    let mut sigbuf = vec![0u8; expected_len];
+    let data_to_sign = SECItemBorrowed::wrap(data);
+    let mut signature = SECItemBorrowed::wrap_mut(&mut sigbuf);
+
+    secstatus_to_res(unsafe {
+        p11::PK11_SignWithMechanism(
+            **private_key,
             mechanism,
             ptr::null_mut(),
-            signature.as_mut(),
-            data_to_sign.as_mut(),
-        ))?;
+            signature.as_mut_ptr(),
+            data_to_sign.as_ptr(),
+        )
+    })?;
 
-        let signature = signature.as_slice().to_vec();
-        Ok(signature)
-    }
+    let actual_len = signature.len();
+    debug_assert_eq!(actual_len, expected_len);
+    sigbuf.truncate(actual_len);
+    Ok(sigbuf)
 }
 
-pub fn sign_ecdsa(private_key: &PrivateKey, data: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn sign_ecdsa(private_key: &PrivateKey, data: &[u8]) -> Res<Vec<u8>> {
     sign(private_key, data, CKM_ECDSA)
 }
 
-pub fn sign_eddsa(private_key: &PrivateKey, data: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn sign_eddsa(private_key: &PrivateKey, data: &[u8]) -> Res<Vec<u8>> {
     sign(private_key, data, CKM_EDDSA)
 }
 
-pub fn verify(
+fn verify(
     public_key: &PublicKey,
     data: &[u8],
     signature: &[u8],
     mechanism: CK_MECHANISM_TYPE,
-) -> Result<bool, Error> {
+) -> Res<bool> {
     init()?;
-    unsafe {
-        let mut data_to_sign = SECItemBorrowed::wrap(data)?;
-        let mut signature = SECItemBorrowed::wrap(signature)?;
+    let data_to_sign = SECItemBorrowed::wrap(data);
+    let signature = SECItemBorrowed::wrap(signature);
 
-        let rv = crate::p11::PK11_VerifyWithMechanism(
-            public_key.as_mut().ok_or(Error::InvalidInput)?,
+    let res = secstatus_to_res(unsafe {
+        p11::PK11_VerifyWithMechanism(
+            **public_key,
             mechanism,
             ptr::null_mut(),
-            signature.as_mut(),
-            data_to_sign.as_mut(),
+            signature.as_ptr(),
+            data_to_sign.as_ptr(),
             ptr::null_mut(),
-        );
+        )
+    });
 
-        match rv {
-            0 => Ok(true),
-            _ => Ok(false),
-        }
+    // Catch a BAD_SIGNATURE error and convert to Ok(false).
+    match res {
+        Ok(()) => Ok(true),
+        Err(Error::Nss { code, .. }) if code == SEC_ERROR_BAD_SIGNATURE => Ok(false),
+        Err(e) => Err(e),
     }
 }
 
-pub fn verify_ecdsa(public_key: &PublicKey, data: &[u8], signature: &[u8]) -> Result<bool, Error> {
+pub fn verify_ecdsa(public_key: &PublicKey, data: &[u8], signature: &[u8]) -> Res<bool> {
     verify(public_key, data, signature, CKM_ECDSA)
 }
 
-pub fn verify_eddsa(public_key: &PublicKey, data: &[u8], signature: &[u8]) -> Result<bool, Error> {
+pub fn verify_eddsa(public_key: &PublicKey, data: &[u8], signature: &[u8]) -> Res<bool> {
     verify(public_key, data, signature, CKM_EDDSA)
 }

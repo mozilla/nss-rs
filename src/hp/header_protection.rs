@@ -14,10 +14,10 @@ use std::{
 
 use super::{SAMPLE_SIZE, SSL_HkdfExpandLabelWithMech};
 use crate::{
-    SECItemBorrowed,
     aead::AeadAlgorithms,
     constants::{Cipher, Version},
     err::{Error, Res, secstatus_to_res},
+    item::{ParamItem, SECItemBorrowed},
     p11::{
         CK_CHACHA20_PARAMS, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, Context, PK11_CipherOp,
         PK11_CreateContextBySymKey, PK11_Encrypt, PK11_GetBlockSize, PK11SymKey, SymKey,
@@ -30,7 +30,7 @@ fn make_aes_ctx(key: &SymKey) -> Res<Context> {
             CKM_AES_ECB,
             CKA_ENCRYPT,
             **key,
-            SECItemBorrowed::make_empty().as_ref(),
+            SECItemBorrowed::make_empty().as_ptr(),
         )
     })
     .map_err(|_| Error::CipherInit)
@@ -76,11 +76,11 @@ impl Key {
                 l.as_ptr().cast(),
                 c_uint::try_from(l.len())?,
                 mech,
-                spec.key_len(),
+                c_uint::try_from(spec.key_len())?,
                 &raw mut secret,
             )
         }?;
-        let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
+        let key = SymKey::from_ptr(secret)?;
         let kind = make_kind(key)?;
 
         debug_assert_eq!(
@@ -134,12 +134,12 @@ impl Key {
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;
-                let mut param_item = SECItemBorrowed::wrap_struct(&params)?;
+                let param_item = ParamItem::wrap(&params);
                 secstatus_to_res(unsafe {
                     PK11_Encrypt(
                         **key,
                         CKM_CHACHA20,
-                        std::ptr::from_mut(param_item.as_mut()),
+                        param_item.as_ptr().cast_mut(), // const_cast!
                         output[..].as_mut_ptr(),
                         &raw mut output_len,
                         c_uint::try_from(output.len())?,

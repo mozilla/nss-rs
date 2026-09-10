@@ -9,9 +9,10 @@
 use std::ptr;
 
 use crate::{
-    Error, SECItemBorrowed,
+    Error,
     err::IntoResult as _,
     hash::{self, HashAlgorithm},
+    item::SECItemBorrowed,
     p11::{
         CK_MECHANISM_TYPE, CKA_SIGN, CKM_SHA256_HMAC, CKM_SHA384_HMAC, CKM_SHA512_HMAC,
         PK11_CreateContextBySymKey, PK11_DigestFinal, PK11_DigestOp, PK11_ImportSymKey, PK11Origin,
@@ -76,14 +77,14 @@ pub fn hmac(alg: &HmacAlgorithm, key: &[u8], data: &[u8]) -> Result<Vec<u8>, Err
             hmac_alg_to_ckm(alg),
             PK11Origin::PK11_OriginUnwrap,
             CKA_SIGN,
-            SECItemBorrowed::wrap(key)?.as_mut(),
+            SECItemBorrowed::wrap(key).as_ptr().cast_mut(), // const_cast!
             ptr::null_mut(),
         )
         .into_result()?
     };
     let param = SECItemBorrowed::make_empty();
     let context = unsafe {
-        PK11_CreateContextBySymKey(hmac_alg_to_ckm(alg), CKA_SIGN, *sym_key, param.as_ref())
+        PK11_CreateContextBySymKey(hmac_alg_to_ckm(alg), CKA_SIGN, *sym_key, param.as_ptr())
             .into_result()?
     };
     unsafe {
