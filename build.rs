@@ -421,14 +421,42 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
 /// so it matches how this NSS actually splits into archives. NSPR is not in that
 /// graph and arrives through `Requires: nspr`.
 ///
-/// `None` when there is no such file, which for an NSS at our minimum version
-/// means it was not built with `--static`.
+/// `None` when there is no such file, which at our minimum NSS version means a
+/// dist that `build.sh --static` did not produce; see [`installed_static_libs`].
 fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     pkg_config_libs(
         &lib_dir.join("pkgconfig"),
         "nss-static",
         &mut HashSet::new(),
     )
+}
+
+/// The libraries to link, guessed from the `archives` that are installed, for a
+/// dist that has no `nss-static.pc`.
+///
+/// Only Android gets here. Its NSS comes from application-services'
+/// `build-nss-android.sh`, which drives gyp directly and so never runs the
+/// `build.sh` that writes the file. That dist is a hand-picked set of archives,
+/// which is the case this guessing handles well.
+///
+/// Take whatever is installed and drop only what would define a symbol twice:
+/// `<x>` shadowed by `<x>_static`, freebl's `*-nodepend*` variants, and
+/// `*-testlib`. The rest is inert, as an unreferenced archive member is never
+/// pulled into the link.
+fn installed_static_libs(archives: &[String]) -> Vec<String> {
+    let shadowed: HashSet<&str> = archives
+        .iter()
+        .filter_map(|lib| lib.strip_suffix("_static"))
+        .collect();
+    archives
+        .iter()
+        .filter(|lib| {
+            !shadowed.contains(lib.as_str())
+                && !lib.contains("-nodepend")
+                && !lib.ends_with("-testlib")
+        })
+        .cloned()
+        .collect()
 }
 
 /// The archive among `archives` that a `.pc`'s `-l<name>` refers to, if NSS
@@ -450,16 +478,17 @@ fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a 
 }
 
 fn static_link(lib_dir: &Path) -> Vec<String> {
-    let archives: HashSet<String> = installed_archives(lib_dir).into_iter().collect();
+    let installed = installed_archives(lib_dir);
     let mut named = pkg_config_static_libs(lib_dir)
         // One that names nothing is no better than no file at all.
         .filter(|libs| !libs.is_empty())
-        .unwrap_or_else(|| {
-            panic!(
-                "no usable nss-static.pc in {}; NSS must be built with --static",
-                lib_dir.join("pkgconfig").display()
-            )
-        });
+        .unwrap_or_else(|| installed_static_libs(&installed));
+    assert!(
+        !named.is_empty(),
+        "nothing to link in {}; is this an NSS built with --static?",
+        lib_dir.display()
+    );
+    let archives: HashSet<String> = installed.into_iter().collect();
     // macOS always dynamically links against the system sqlite library, so NSS
     // builds no copy of its own there for the .pc to name.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
