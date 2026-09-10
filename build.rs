@@ -431,9 +431,27 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     )
 }
 
+/// The archive among `archives` that a `.pc`'s `-l<name>` refers to, if NSS
+/// installed one.
+///
+/// A `.pc` spells library names the Unix way, but MSVC has no `lib` prefix
+/// convention and NSPR marks its static build with `_s`, so `nspr.pc` asks for
+/// `-lnspr4` where the file is `libnspr4_s.lib`. Prefer a `_s` spelling to a
+/// plain prefixed one, which on Windows can be an import library.
+fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a String> {
+    [
+        name.to_owned(),
+        format!("{name}_s"),
+        format!("lib{name}_s"),
+        format!("lib{name}"),
+    ]
+    .iter()
+    .find_map(|candidate| archives.get(candidate))
+}
+
 fn static_link(lib_dir: &Path) -> Vec<String> {
     let archives: HashSet<String> = installed_archives(lib_dir).into_iter().collect();
-    let mut static_libs = pkg_config_static_libs(lib_dir)
+    let mut named = pkg_config_static_libs(lib_dir)
         // One that names nothing is no better than no file at all.
         .filter(|libs| !libs.is_empty())
         .unwrap_or_else(|| {
@@ -446,18 +464,26 @@ fn static_link(lib_dir: &Path) -> Vec<String> {
     // builds no copy of its own there for the .pc to name.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
     if env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" {
-        static_libs.push(String::from("sqlite3"));
+        named.push(String::from("sqlite3"));
     }
-    for lib in &static_libs {
-        // Whatever NSS didn't build here has to come from the system.
-        let kind = if archives.contains(lib) {
-            "static"
-        } else {
-            "dylib"
-        };
-        println!("cargo:rustc-link-lib={kind}={lib}");
-    }
-    static_libs
+    // Return what was linked, not what the .pc called it, so that `link_search`
+    // can find the files again.
+    named
+        .iter()
+        .map(|name| {
+            resolve_archive(&archives, name).map_or_else(
+                || {
+                    // Whatever NSS didn't build here has to come from the system.
+                    println!("cargo:rustc-link-lib=dylib={name}");
+                    name.clone()
+                },
+                |archive| {
+                    println!("cargo:rustc-link-lib=static={archive}");
+                    archive.clone()
+                },
+            )
+        })
+        .collect()
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
