@@ -279,7 +279,7 @@ fn link_search<S: AsRef<str>>(dir: &Path, libs: &[S]) {
     rerun_if_libs_changed(dir, libs);
 }
 
-fn dynamic_link() -> Vec<&'static str> {
+fn dynamic_link() -> Vec<String> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let dynamic_libs = if target_os == "windows" {
         [
@@ -299,6 +299,7 @@ fn dynamic_link() -> Vec<&'static str> {
     dynamic_libs
         .into_iter()
         .chain(maybe_link_freebl3())
+        .map(String::from)
         .collect()
 }
 
@@ -336,16 +337,28 @@ fn installed_archives(lib_dir: &Path) -> Vec<String> {
     libs
 }
 
-/// The module names in the pkg-config `Requires:` field without verison constraints.
+/// The module names in the pkg-config `Requires:` field without version constraints.
+///
+/// A constraint needs no surrounding space, so `nspr >= 4.40`, `nspr >=4.40` and
+/// `nspr>=4.40` all name just `nspr`.
 fn required_modules(field: &str) -> Vec<String> {
     let mut modules = Vec::new();
-    let mut tokens = field.split([',', ' ', '\t']).filter(|t| !t.is_empty());
-    while let Some(token) = tokens.next() {
-        if ["<", "<=", "=", "!=", ">=", ">"].contains(&token) {
-            tokens.next(); // The version it constrains, which we don't check.
-        } else {
-            modules.push(token.to_owned());
+    let mut skip_version = false;
+    for token in field.split([',', ' ', '\t']).filter(|t| !t.is_empty()) {
+        if std::mem::take(&mut skip_version) {
+            continue;
         }
+        let Some(op) = token.find(['<', '>', '=', '!']) else {
+            modules.push(token.to_owned());
+            continue;
+        };
+        if op > 0 {
+            modules.push(token[..op].to_owned());
+        }
+        // The version follows the operator, unless the token ends at it.
+        skip_version = token[op..]
+            .trim_start_matches(['<', '>', '=', '!'])
+            .is_empty();
     }
     modules
 }
@@ -354,7 +367,12 @@ fn required_modules(field: &str) -> Vec<String> {
 ///
 /// Not pkg-config: resolves modules within `pc_dir` only, and reads only `Libs`,
 /// `Libs.private` and `Requires`. `-L` is `${libdir}`, which the caller already
-/// searches.
+/// searches. Shelling out to the real thing would give us variable expansion and
+/// `Requires` for free, but it is not there to shell out to on the Windows and
+/// Android builds that need this.
+///
+/// Each module is emitted once, at its first mention, which for a graph deeper
+/// than NSS's `nss-static` -> `nspr` need not be a correct link order.
 fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> Option<Vec<String>> {
     if !seen.insert(module.to_owned()) {
         return Some(Vec::new());
@@ -366,20 +384,17 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
     let mut libs = Vec::new();
     let mut requires = Vec::new();
     for line in text.lines() {
-        // Fields are `Name: value`; skip variable definitions, which can hold a
-        // colon of their own in a Windows drive letter.
+        // Fields are `Name: value`. A variable definition can hold a colon too,
+        // in a Windows drive letter, but its key matches no field below.
         let Some((key, value)) = line.split_once(':') else {
             continue;
         };
-        if key.contains('=') {
-            continue;
-        }
         match key.trim().to_ascii_lowercase().as_str() {
             "libs" | "libs.private" => libs.extend(
                 value
                     .split_whitespace()
                     .filter_map(|flag| flag.strip_prefix("-l"))
-                    .map(ToOwned::to_owned),
+                    .map(String::from),
             ),
             "requires" | "requires.private" => requires.extend(required_modules(value)),
             _ => {}
@@ -387,7 +402,15 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
     }
     // A required module is a dependency, so it links last.
     for required in requires {
-        libs.extend(pkg_config_libs(pc_dir, &required, seen)?);
+        let Some(required_libs) = pkg_config_libs(pc_dir, &required, seen) else {
+            // Report the file that is actually missing; the caller only knows
+            // that the module it asked for could not be resolved.
+            panic!(
+                "{module}.pc requires {required}, but there is no {}",
+                pc_dir.join(format!("{required}.pc")).display()
+            );
+        };
+        libs.extend(required_libs);
     }
     Some(libs)
 }
@@ -410,28 +433,29 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
 
 fn static_link(lib_dir: &Path) -> Vec<String> {
     let archives: HashSet<String> = installed_archives(lib_dir).into_iter().collect();
-    let static_libs = pkg_config_static_libs(lib_dir).unwrap_or_else(|| {
-        panic!(
-            "no nss-static.pc in {}; NSS must be built with --static",
-            lib_dir.join("pkgconfig").display()
-        )
-    });
+    let mut static_libs = pkg_config_static_libs(lib_dir)
+        // One that names nothing is no better than no file at all.
+        .filter(|libs| !libs.is_empty())
+        .unwrap_or_else(|| {
+            panic!(
+                "no usable nss-static.pc in {}; NSS must be built with --static",
+                lib_dir.join("pkgconfig").display()
+            )
+        });
+    // macOS always dynamically links against the system sqlite library, so NSS
+    // builds no copy of its own there for the .pc to name.
+    // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" {
+        static_libs.push(String::from("sqlite3"));
+    }
     for lib in &static_libs {
-        // A .pc can name a library NSS didn't build, such as a system sqlite3.
+        // Whatever NSS didn't build here has to come from the system.
         let kind = if archives.contains(lib) {
             "static"
         } else {
             "dylib"
         };
         println!("cargo:rustc-link-lib={kind}={lib}");
-    }
-    // macOS always dynamically links against the system sqlite library, so NSS
-    // doesn't build its own copy there.
-    // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
-    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos"
-        && !static_libs.iter().any(|lib| lib == "sqlite3")
-    {
-        println!("cargo:rustc-link-lib=dylib=sqlite3");
     }
     static_libs
 }
@@ -619,7 +643,7 @@ fn setup_standalone(nss_dir: String) -> Vec<String> {
     {
         static_link(&nsslibdir)
     } else {
-        dynamic_link().into_iter().map(ToOwned::to_owned).collect()
+        dynamic_link()
     };
     link_search(&nsslibdir, &libs);
 
