@@ -311,26 +311,21 @@ fn maybe_link_freebl3() -> Option<&'static str> {
 }
 
 /// The archives in `lib_dir`: `nss_static` for `libnss_static.a` and `nss_static.lib`.
-/// Windows import libraries are left out.
+///
+/// Only used to tell whether a name from a `.pc` is something NSS built here, so
+/// an import library among them is harmless: no `.pc` names one.
 fn installed_archives(lib_dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(lib_dir) else {
         return Vec::new();
     };
-    let files: Vec<String> = entries
+    let mut libs: Vec<String> = entries
         .flatten()
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect();
-    let dlls: HashSet<&str> = files
-        .iter()
-        .filter_map(|f| f.strip_suffix(".dll"))
-        .collect();
-    let mut libs: Vec<String> = files
-        .iter()
         .filter_map(|file| {
             if let Some(name) = file.strip_suffix(".lib") {
                 // MSVC has no `lib` prefix convention, so a name that carries one
                 // there is part of the library's name, as it is for NSPR.
-                return (!dlls.contains(name)).then(|| name.to_owned());
+                return Some(name.to_owned());
             }
             let name = file.strip_suffix(".a")?;
             Some(name.strip_prefix("lib").unwrap_or(name).to_owned())
@@ -403,7 +398,8 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
 /// so it matches how this NSS actually splits into archives. NSPR is not in that
 /// graph and arrives through `Requires: nspr`.
 ///
-/// `None` for an NSS predating bug 2068788, which wrote no such file.
+/// `None` when there is no such file, which for an NSS at our minimum version
+/// means it was not built with `--static`.
 fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     pkg_config_libs(
         &lib_dir.join("pkgconfig"),
@@ -412,36 +408,14 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     )
 }
 
-/// The libraries to link, guessed from what is in `lib_dir`, for an NSS that
-/// writes no `nss-static.pc`.
-///
-/// Which archives a static build produces varies with version, target and build
-/// flags, so take whatever is installed and drop only what would define a symbol
-/// twice: `<x>` shadowed by `<x>_static`, freebl's `*-nodepend*` variants, and
-/// `*-testlib`. The rest is inert, as an unreferenced archive member is never
-/// pulled into the link.
-fn installed_static_libs(lib_dir: &Path) -> Vec<String> {
-    let mut libs = installed_archives(lib_dir);
-    let shadowed: HashSet<String> = libs
-        .iter()
-        .filter_map(|lib| lib.strip_suffix("_static").map(ToOwned::to_owned))
-        .collect();
-    libs.retain(|lib| {
-        !shadowed.contains(lib) && !lib.contains("-nodepend") && !lib.ends_with("-testlib")
-    });
-    libs
-}
-
 fn static_link(lib_dir: &Path) -> Vec<String> {
     let archives: HashSet<String> = installed_archives(lib_dir).into_iter().collect();
-    let static_libs =
-        pkg_config_static_libs(lib_dir).unwrap_or_else(|| installed_static_libs(lib_dir));
-    if static_libs.is_empty() {
-        println!(
-            "cargo:warning={} names no libraries to link; is this an NSS built with --static?",
-            lib_dir.display()
-        );
-    }
+    let static_libs = pkg_config_static_libs(lib_dir).unwrap_or_else(|| {
+        panic!(
+            "no nss-static.pc in {}; NSS must be built with --static",
+            lib_dir.join("pkgconfig").display()
+        )
+    });
     for lib in &static_libs {
         // A .pc can name a library NSS didn't build, such as a system sqlite3.
         let kind = if archives.contains(lib) {
