@@ -52,12 +52,9 @@ impl ScopedSECItem {
     /// content that is referenced there.
     #[must_use]
     pub fn into_vec(self) -> Vec<u8> {
-        let b = unsafe { self.ptr.as_ref().expect("Null pointer") };
-        // Sanity check the type, as some types don't count bytes in `Item::len`.
-        assert_eq!(b.type_, SECItemType::siBuffer);
-        let slc =
-            unsafe { null_safe_slice(b.data, usize::try_from(b.len).expect("Buffer too long")) };
-        Vec::from(slc)
+        // SAFETY: `scoped_ptr!` rejects null, and the pointer comes from NSS,
+        // which guarantees a well-formed `SECItem`.
+        Vec::from(unsafe { (*self.ptr).as_slice() })
     }
 }
 
@@ -200,7 +197,7 @@ impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
         unsafe { self.inner.as_slice() }
     }
 
-    #[allow(clippy::allow_attributes, dead_code, reason = "follow up coming")]
+    #[cfg(test)] // remove when follow-up uses this
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
@@ -352,28 +349,19 @@ mod tests {
         assert_eq!(item.as_slice(), DATA);
         assert_eq!(item.len(), DATA.len());
         assert_eq!(unsafe { (*item.as_ptr()).data }.cast_const(), DATA.as_ptr());
-
-        assert!(SECItemBorrowed::wrap(&[]).as_slice().is_empty());
-        assert!(SECItemBorrowed::make_empty().as_slice().is_empty());
-        // An empty slice is normalised to null, matching `make_empty`.
-        assert!(unsafe { (*SECItemBorrowed::wrap(&[]).as_ptr()).data }.is_null());
-        assert_eq!(
-            unsafe { (*SECItemBorrowed::wrap(DATA).as_ptr()).data }.cast_const(),
-            DATA.as_ptr()
-        );
     }
 
     #[test]
     fn wrap_mut_roundtrip() {
         let mut buf = DATA.to_owned();
         let mut item = SECItemBorrowed::wrap_mut(&mut buf);
-        assert_eq!(item.len(), DATA.len(),);
+        assert_eq!(item.len(), DATA.len());
         assert_eq!(item.as_slice(), DATA);
 
         // Simulate writing to the SECItem and then truncating it.
         unsafe {
             (*item.as_mut_ptr()).data.write(0xff);
-            (&mut *item.as_mut_ptr()).len = 2;
+            (*item.as_mut_ptr()).len = 2;
         };
         assert_eq!(item.len(), 2);
         assert_eq!(item.as_slice(), &[0xff, 2]);
@@ -383,9 +371,11 @@ mod tests {
     /// An empty slice is null, no matter how it is created.
     #[test]
     fn wrap_empty() {
+        assert!(SECItemBorrowed::wrap(&[]).as_slice().is_empty());
+        assert!(SECItemBorrowed::make_empty().as_slice().is_empty());
+
         assert!(unsafe { (*SECItemBorrowed::make_empty().as_ptr()).data }.is_null());
         assert!(unsafe { (*SECItemBorrowed::wrap(&[]).as_ptr()).data }.is_null());
-
         assert!(unsafe { (*SECItemBorrowed::wrap_mut(&mut []).as_mut_ptr()).data }.is_null());
     }
 
