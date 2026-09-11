@@ -43,4 +43,12 @@ pub fn roundtrip(secret: &SymKey, cipher: Cipher) {
         .decrypt_in_place(1, aad, &mut ip)
         .expect("decrypt_in_place");
     assert_eq!(&ip[..dec_len], plaintext);
+
+    // Tamper with the tag and confirm decrypt_in_place rejects it.
+    let mut tampered = Vec::from(plaintext as &[u8]);
+    tampered.resize(plaintext.len() + enc.expansion(), 0);
+    enc.encrypt_in_place(2, aad, &mut tampered)
+        .expect("encrypt_in_place");
+    *tampered.last_mut().expect("non-empty") ^= 0xff;
+    assert!(dec.decrypt_in_place(2, aad, &mut tampered).is_err());
 }
