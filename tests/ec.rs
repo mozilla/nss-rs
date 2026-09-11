@@ -5,7 +5,10 @@
 // except according to those terms.
 
 use nss_rs::{
-    ec::{EcCurve, ecdh, ecdh_keygen, export_ec_private_key_from_raw},
+    ec::{
+        EcCurve, ecdh, ecdh_keygen, export_ec_private_key_from_raw, sign_ecdsa, sign_eddsa,
+        verify_ecdsa, verify_eddsa,
+    },
     generate_ech_keys,
 };
 use test_fixture::fixture_init;
@@ -99,6 +102,34 @@ fn keygen_p521() {
     assert_eq!(136, alt.len());
     assert_eq!(&[4, 129, 133, 4], &alt[0..4]);
     assert_eq!(&alt[3..], raw.as_slice());
+}
+
+#[test]
+fn ecdsa_sign_verify_all_curves() {
+    fixture_init();
+
+    // P-256 signatures are 64 bytes, but P-384 is 96 and P-521 is 132. A fixed
+    // 64-byte output buffer made the larger curves fail with SEC_ERROR_OUTPUT_LEN.
+    for curve in [EcCurve::P256, EcCurve::P384, EcCurve::P521] {
+        let key = ecdh_keygen(&curve).unwrap();
+        let data = [0x5a_u8; 32];
+        let sig = sign_ecdsa(&key.private, &data).unwrap_or_else(|e| panic!("{curve:?}: {e:?}"));
+        assert!(verify_ecdsa(&key.public, &data, &sig).unwrap());
+        // A tampered message must not verify.
+        let mut other = data;
+        other[0] ^= 0xff;
+        assert!(!verify_ecdsa(&key.public, &other, &sig).unwrap());
+    }
+}
+
+#[test]
+fn eddsa_sign_verify() {
+    fixture_init();
+
+    let key = ecdh_keygen(&EcCurve::Ed25519).unwrap();
+    let data = [0x5a_u8; 32];
+    let sig = sign_eddsa(&key.private, &data).unwrap();
+    assert!(verify_eddsa(&key.public, &data, &sig).unwrap());
 }
 
 #[test]
