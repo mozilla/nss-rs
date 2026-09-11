@@ -20,7 +20,7 @@ pub use recprot::RecordProtection;
 use crate::{
     Cipher, SECItemBorrowed, SymKey,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
+    err::{Error, Res},
     p11::{
         self, CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE, CKA_DECRYPT, CKA_ENCRYPT, CKA_NSS_MESSAGE,
         CKG_GENERATE_COUNTER_XOR, CKG_NO_GENERATE, CKM_AES_GCM, CKM_CHACHA20_POLY1305, Context,
@@ -31,6 +31,7 @@ use crate::{
 #[cfg(not(feature = "disable-encryption"))]
 use crate::{
     Version,
+    err::sec::SEC_ERROR_BAD_DATA,
     hp::SSL_HkdfExpandLabelWithMech,
     p11::{CKM_HKDF_DATA, PK11SymKey},
 };
@@ -168,6 +169,7 @@ const TAG_LEN: usize = 16;
 
 /// Split `data` into `(ct_len, tag)`, returning `SEC_ERROR_BAD_DATA` if it is
 /// too short to contain a tag.
+#[cfg(not(feature = "disable-encryption"))]
 fn split_tag(data: &[u8]) -> Res<(usize, [u8; TAG_LEN])> {
     let ct_len = data
         .len()

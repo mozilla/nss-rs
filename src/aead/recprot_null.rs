@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use super::{Mode, RecordProtectionOps, split_tag};
+use super::{Mode, RecordProtectionOps};
 use crate::{Cipher, Error, Res, SymKey, Version, err::sec::SEC_ERROR_BAD_DATA};
 
 pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
@@ -15,15 +15,17 @@ pub struct RecordProtection {}
 
 impl RecordProtection {
     fn decrypt_check(_count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-        let (len_encrypted, tag) = split_tag(input)?;
+        let ct_len = input
+            .len()
+            .checked_sub(AEAD_NULL_TAG.len())
+            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
+        let (ct, tag) = input.split_at(ct_len);
         // Check that:
-        // 1) expansion is all zeros and
-        // 2) if the encrypted data is also supplied that at least some values are no zero
+        // 1) expansion matches AEAD_NULL_TAG and
+        // 2) if the encrypted data is also supplied that at least some values are not zero
         //    (otherwise padding will be interpreted as a valid packet)
-        if tag.as_slice() == AEAD_NULL_TAG
-            && (len_encrypted == 0 || input[..len_encrypted].iter().any(|x| *x != 0x0))
-        {
-            Ok(len_encrypted)
+        if tag == AEAD_NULL_TAG && (ct_len == 0 || ct.iter().any(|x| *x != 0x0)) {
+            Ok(ct_len)
         } else {
             Err(Error::from(SEC_ERROR_BAD_DATA))
         }
@@ -89,10 +91,12 @@ impl RecordProtectionOps for RecordProtection {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        Self::decrypt_check(count, aad, input).map(|len| {
-            output[..len].copy_from_slice(&input[..len]);
-            &output[..len]
-        })
+        let len = Self::decrypt_check(count, aad, input)?;
+        if output.len() < len {
+            return Err(Error::from(SEC_ERROR_BAD_DATA));
+        }
+        output[..len].copy_from_slice(&input[..len]);
+        Ok(&output[..len])
     }
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
@@ -192,5 +196,15 @@ mod tests {
         let mut buf = vec![0u8; 4 + a.expansion()];
         buf[4..].copy_from_slice(AEAD_NULL_TAG);
         assert!(a.decrypt(0, b"", &buf, &mut []).is_err());
+    }
+
+    #[test]
+    fn decrypt_fails_output_too_small() {
+        let a = aead();
+        let plaintext = b"test";
+        let mut buf = vec![0u8; plaintext.len() + a.expansion()];
+        a.encrypt(0, b"", plaintext, &mut buf).unwrap();
+        let mut small_out = vec![0u8; plaintext.len() - 1];
+        assert!(a.decrypt(0, b"", &buf, &mut small_out).is_err());
     }
 }
