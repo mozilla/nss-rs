@@ -107,7 +107,7 @@ impl HandshakeState {
 
 fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
     let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
-    let mut chosen = vec![0_u8; 255];
+    let mut chosen = [0_u8; 255];
     let mut chosen_len: c_uint = 0;
     secstatus_to_res(unsafe {
         ssl::SSL_GetNextProto(
@@ -126,11 +126,10 @@ fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
             ssl::SSLNextProtoState::SSL_NEXT_PROTO_NEGOTIATED
             | ssl::SSLNextProtoState::SSL_NEXT_PROTO_SELECTED,
         ) => {
-            chosen.truncate(usize::try_from(chosen_len)?);
-            Some(match String::from_utf8(chosen) {
-                Ok(a) => a,
-                Err(_) => return Err(Error::Internal),
-            })
+            let chosen_len = usize::try_from(chosen_len)?;
+            let chosen = chosen.get(..chosen_len).ok_or(Error::Internal)?;
+            let chosen = str::from_utf8(chosen).map_err(|_| Error::Internal)?;
+            Some(chosen.to_owned())
         }
         _ => None,
     };
