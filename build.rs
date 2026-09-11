@@ -463,15 +463,18 @@ fn installed_static_libs(archives: &[String]) -> Vec<String> {
 /// installed one.
 ///
 /// A `.pc` spells library names the Unix way, but MSVC has no `lib` prefix
-/// convention and NSPR marks its static build with `_s`, so `nspr.pc` asks for
-/// `-lnspr4` where the file is `libnspr4_s.lib`. Prefer a `_s` spelling to a
-/// plain prefixed one, which on Windows can be an import library.
+/// convention, so `nspr.pc` asks for `-lnspr4` where the file is `libnspr4.lib`.
+///
+/// NSPR also installs a `_s` archive, and that is deliberately the last resort:
+/// on Windows even a `--static` NSS compiles against NSPR as a DLL, so its
+/// objects want the `__imp_` symbols that only the import library defines.
+/// Linking `libnspr4_s.lib` to satisfy `-lnspr4` leaves those undefined.
 fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a String> {
     [
         name.to_owned(),
+        format!("lib{name}"),
         format!("{name}_s"),
         format!("lib{name}_s"),
-        format!("lib{name}"),
     ]
     .iter()
     .find_map(|candidate| archives.get(candidate))
