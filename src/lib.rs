@@ -6,23 +6,25 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[macro_use]
+mod err;
+#[macro_use]
+mod exp;
+#[macro_use]
+mod wrap;
+
 pub mod agent;
 mod agentio;
 mod auth;
 pub mod cert;
 pub mod constants;
 mod ech;
-#[macro_use]
-mod util;
-#[macro_use]
-mod err;
-#[macro_use]
-mod exp;
 pub mod ext;
 #[cfg(all(not(feature = "disable-encryption"), feature = "blapi"))]
 pub(crate) mod freebl;
 pub mod hkdf;
 pub mod hp;
+mod item;
 
 pub mod aead;
 pub mod der;
@@ -73,7 +75,6 @@ pub use self::{
     replay::AntiReplay,
     secrets::SecretDirection,
     ssl::Opt,
-    util::*,
 };
 
 const MINIMUM_NSS_VERSION: &str = env!("NSS_MIN_VERSION");
@@ -89,7 +90,7 @@ pub mod nss_prelude {
 
     include!(concat!(env!("OUT_DIR"), "/nss_prelude.rs"));
 }
-pub use nss_prelude::{SECItem, SECItemArray, SECItemType, SECStatus};
+pub use nss_prelude::SECStatus;
 
 #[expect(non_upper_case_globals, reason = "Code is bindgen-generated.")]
 mod nss {

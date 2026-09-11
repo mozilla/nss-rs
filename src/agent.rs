@@ -27,7 +27,7 @@ use log::{debug, info, trace, warn};
 
 pub use crate::agentio::{Record, RecordList, as_c_void};
 use crate::{
-    SECItem, SECItemArray, SECItemBorrowed, SECStatus,
+    SECStatus,
     agentio::{AgentIo, METHODS},
     assert_initialized,
     auth::AuthenticationStatus,
@@ -38,6 +38,7 @@ use crate::{
     ech,
     err::{Error, PRErrorCode, Res, is_blocked, secstatus_to_res},
     ext::{ExtensionHandler, ExtensionTracker, SSL_CallExtensionWriterOnEchInner},
+    item::{SECItem, SECItemArray, SECItemBorrowed},
     nss_prelude::SECWouldBlock,
     null_safe_slice,
     p11::{self, PrivateKey, PublicKey, hex_with_len},
@@ -1217,21 +1218,25 @@ impl Server {
         let mut agent = SecretAgent::new()?;
         for n in certificates {
             let (cert, key) = load_cert_and_key(n.as_ref())?;
-            let ocsp_items: Vec<SECItemBorrowed> = ocsp_responses
+
+            let ocsp_items = ocsp_responses
                 .iter()
                 .map(|b| SECItemBorrowed::wrap(b))
-                .collect::<Res<_>>()?;
+                .collect::<Vec<_>>();
+            // safety-adjacent: This depends on `SECItemBorrowed` being
+            // `#[repr(transparent)]` so that array items can be aliased to `SECItem`.
             let ocsp_array = SECItemArray {
                 items: ocsp_items.as_ptr().cast::<SECItem>().cast_mut(),
                 len: c_uint::try_from(ocsp_items.len())?,
             };
-            let sct_item = SECItemBorrowed::wrap(scts)?;
+
+            let sct_item = SECItemBorrowed::wrap(scts);
             let extra = ssl::SSLExtraServerCertDataStr {
                 // ssl_auth_null means "I don't care what sort of certificate this is".
                 authType: ssl::SSLAuthType::ssl_auth_null,
                 certChain: null(),
                 stapledOCSPResponses: &raw const ocsp_array,
-                signedCertTimestamps: std::ptr::from_ref(&sct_item).cast(),
+                signedCertTimestamps: sct_item.as_ptr(),
                 delegCred: null(),
                 delegCredPrivKey: null(),
             };

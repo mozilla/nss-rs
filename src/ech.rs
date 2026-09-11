@@ -7,19 +7,14 @@
 use std::{
     ffi::CString,
     os::raw::{c_char, c_uint},
-    ptr::{addr_of_mut, null_mut},
 };
 
-use log::trace;
-
 use crate::{
-    SECItem, SECItemBorrowed, SECItemMut, der,
+    ec::{Keypair, ecdh_keygen},
     err::{Error, Res, ssl::SSL_ERROR_ECH_RETRY_WITH_ECH},
-    experimental_api, null_safe_slice,
-    p11::{
-        self, CKF_DERIVE, CKM_EC_KEY_PAIR_GEN, PrivateKey, PublicKey, SECKEYPrivateKey,
-        SECKEYPublicKey, Slot,
-    },
+    item::{SECItem, SECItemMut},
+    null_safe_slice,
+    p11::{PrivateKey, PublicKey, SECKEYPrivateKey, SECKEYPublicKey},
     prio::PRFileDesc,
     ssl::PRBool,
 };
@@ -94,55 +89,8 @@ pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
 ///
 /// When underlying types aren't large enough to hold keys.  So never.
 pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
-    let slot = Slot::internal()?;
-
-    let oid_data = unsafe { p11::SECOID_FindOIDByTag(p11::SECOidTag::SEC_OID_CURVE25519) };
-    let oid = unsafe { oid_data.as_ref() }.ok_or(Error::Internal)?;
-    let oid_slc = unsafe { null_safe_slice(oid.oid.data, oid.oid.len) };
-    let params = der::object_id(oid_slc)?;
-
-    let mut public_ptr: *mut SECKEYPublicKey = null_mut();
-    let mut param_item = SECItemBorrowed::wrap(&params)?;
-
-    // If we have tracing on, try to ensure that key data can be read.
-    let insensitive_secret_ptr = if log::log_enabled!(log::Level::Trace) {
-        unsafe {
-            p11::PK11_GenerateKeyPairWithOpFlags(
-                *slot,
-                CKM_EC_KEY_PAIR_GEN,
-                addr_of_mut!(param_item).cast(),
-                &raw mut public_ptr,
-                p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
-                CKF_DERIVE,
-                CKF_DERIVE,
-                null_mut(),
-            )
-        }
-    } else {
-        null_mut()
-    };
-    assert_eq!(insensitive_secret_ptr.is_null(), public_ptr.is_null());
-    let secret_ptr = if insensitive_secret_ptr.is_null() {
-        unsafe {
-            p11::PK11_GenerateKeyPairWithOpFlags(
-                *slot,
-                CKM_EC_KEY_PAIR_GEN,
-                addr_of_mut!(param_item).cast(),
-                &raw mut public_ptr,
-                p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
-                CKF_DERIVE,
-                CKF_DERIVE,
-                null_mut(),
-            )
-        }
-    } else {
-        insensitive_secret_ptr
-    };
-    assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
-    let sk = PrivateKey::from_ptr(secret_ptr)?;
-    let pk = PublicKey::from_ptr(public_ptr)?;
-    trace!("Generated key pair: sk={sk:?} pk={pk:?}");
-    Ok((sk, pk))
+    let Keypair { private, public } = ecdh_keygen(crate::ec::Curve::X25519)?;
+    Ok((private, public))
 }
 
 /// Encode a configuration for encrypted client hello (ECH).

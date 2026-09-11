@@ -20,8 +20,9 @@ use std::{
 
 use crate::{
     err::{Error, Res, secstatus_to_res},
+    item::SECItemMut,
     nss_prelude::SECITEM_FreeItem,
-    util::SECItemMut,
+    null_safe_slice,
 };
 
 #[must_use]
@@ -55,8 +56,6 @@ mod nss_p11 {
 
 pub use nss_p11::*;
 
-use crate::null_safe_slice;
-
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
 scoped_ptr!(CertList, CERTCertList, CERT_DestroyCertList);
 
@@ -79,10 +78,10 @@ impl PublicKey {
     /// * [`Error::InvalidInput`][]: for non-HPKE key types.
     ///
     /// [0]: https://www.rfc-editor.org/rfc/rfc9180.html#section-7.1.1
-    /// [P256]: crate::ec::EcCurve::P256
-    /// [P384]: crate::ec::EcCurve::P384
-    /// [P521]: crate::ec::EcCurve::P521
-    /// [X25519]: crate::ec::EcCurve::X25519
+    /// [P256]: crate::ec::Curve::P256
+    /// [P384]: crate::ec::Curve::P384
+    /// [P521]: crate::ec::Curve::P521
+    /// [X25519]: crate::ec::Curve::X25519
     pub fn key_data(&self) -> Res<Vec<u8>> {
         let ptr = unsafe { self.ptr.as_ref() }.ok_or(Error::InvalidInput)?;
 
