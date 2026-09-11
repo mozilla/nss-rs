@@ -313,8 +313,8 @@ fn maybe_link_freebl3() -> Option<&'static str> {
 
 /// The archives in `lib_dir`: `nss_static` for `libnss_static.a` and `nss_static.lib`.
 ///
-/// Only used to tell whether a name from a `.pc` is something NSS built here, so
-/// an import library among them is harmless: no `.pc` names one.
+/// On Windows this also picks up import libraries, as `nss3.dll` from `nss3.dll.lib`.
+/// [`resolve_archive`] never asks for one, and [`installed_static_libs`] drops them.
 fn installed_archives(lib_dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(lib_dir) else {
         return Vec::new();
@@ -335,6 +335,32 @@ fn installed_archives(lib_dir: &Path) -> Vec<String> {
     libs.sort_unstable();
     libs.dedup();
     libs
+}
+
+/// The `-l` names a system pkg-config reports for `module`, for a requirement the
+/// dist does not describe itself.
+///
+/// `build.sh --with-nspr`/`--system-nspr` installs no `nspr.pc` beside the
+/// archives, yet still writes `Requires: nspr` into `nss-static.pc`. The system
+/// NSPR that satisfies it brings its own `.pc`, so ask for it the usual way.
+///
+/// `None` where there is no pkg-config to run, which is every target that made
+/// the in-tree parser necessary in the first place.
+fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
+    let output = Command::new("pkg-config")
+        .args(["--libs-only-l", "--static", module])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let libs = String::from_utf8(output.stdout).ok()?;
+    Some(
+        libs.split_whitespace()
+            .filter_map(|flag| flag.strip_prefix("-l"))
+            .map(String::from)
+            .collect(),
+    )
 }
 
 /// The module names in the pkg-config `Requires:` field without version constraints.
@@ -402,13 +428,17 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
     }
     // A required module is a dependency, so it links last.
     for required in requires {
-        let Some(required_libs) = pkg_config_libs(pc_dir, &required, seen) else {
-            // Report the file that is actually missing; the caller only knows
-            // that the module it asked for could not be resolved.
-            panic!(
-                "{module}.pc requires {required}, but there is no {}",
+        let Some(required_libs) =
+            pkg_config_libs(pc_dir, &required, seen).or_else(|| system_pkg_config_libs(&required))
+        else {
+            // Name the file that is actually missing; the caller only knows that
+            // the module it asked for could not be resolved.
+            println!(
+                "cargo:warning=no {}, required by {module}.pc, and no system \
+                 pkg-config to ask; guessing the libraries to link instead",
                 pc_dir.join(format!("{required}.pc")).display()
             );
+            return None;
         };
         libs.extend(required_libs);
     }
@@ -439,11 +469,19 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
 /// `build.sh` that writes the file. That dist is a hand-picked set of archives,
 /// which is the case this guessing handles well.
 ///
-/// Take whatever is installed and drop only what would define a symbol twice:
-/// `<x>` shadowed by `<x>_static`, freebl's `*-nodepend*` variants, and
-/// `*-testlib`. The rest is inert, as an unreferenced archive member is never
-/// pulled into the link.
+/// Take whatever is installed and drop what would define a symbol twice:
+///
+/// - `<x>` shadowed by `<x>_static`, the copy built for the shared library.
+/// - `<x>_s` shadowed by `<x>`, NSPR's static build where its import library is also installed.
+///   That ordering matches [`resolve_archive`], and for the same reason: a `--static` NSS still
+///   compiles against NSPR as a DLL.
+/// - `*-nodepend*`, freebl's `FREEBL_NO_DEPEND` variants.
+/// - `*-testlib`, which duplicates what it tests.
+/// - `<x>.dll`, from a `<x>.dll.lib` import library, which the `_static` archives replace.
+///
+/// The rest is inert, as an unreferenced archive member is never pulled into the link.
 fn installed_static_libs(archives: &[String]) -> Vec<String> {
+    let installed: HashSet<&str> = archives.iter().map(String::as_str).collect();
     let shadowed: HashSet<&str> = archives
         .iter()
         .filter_map(|lib| lib.strip_suffix("_static"))
@@ -454,6 +492,12 @@ fn installed_static_libs(archives: &[String]) -> Vec<String> {
             !shadowed.contains(lib.as_str())
                 && !lib.contains("-nodepend")
                 && !lib.ends_with("-testlib")
+                && !Path::new(lib.as_str())
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
+                && !lib
+                    .strip_suffix("_s")
+                    .is_some_and(|plain| installed.contains(plain))
         })
         .cloned()
         .collect()
