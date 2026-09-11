@@ -297,12 +297,9 @@ impl Aead {
         assert_eq!(self.mode, Mode::Encrypt);
         // A copy for the nonce generator to write into.  But we don't use the value.
         let mut nonce = self.nonce_base;
-        // Ciphertext with enough space for the tag.
-        // Even though we give the operation a separate buffer for the tag,
-        // reserve the capacity on allocation.
-        let mut ct = vec![0; pt.len() + TAG_LEN];
+        let mut ct = vec![0; pt.len() + TAG_LEN]; // Tag is written directly into the tail.
         let mut ct_len: c_int = 0;
-        let mut tag = vec![0; TAG_LEN];
+        let ct_ptr = ct.as_mut_ptr();
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
@@ -312,18 +309,19 @@ impl Aead {
                 c_int_len(nonce.len())?,
                 aad.as_ptr(),
                 c_int_len(aad.len())?,
-                ct.as_mut_ptr(),
+                ct_ptr,
                 &raw mut ct_len,
                 c_int_len(ct.len())?, // signed :(
-                tag.as_mut_ptr(),
-                c_int_len(tag.len())?,
+                ct_ptr.add(pt.len()),
+                c_int_len(TAG_LEN)?,
                 pt.as_ptr(),
                 c_int_len(pt.len())?,
             )
         })?;
-        ct.truncate(usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?);
-        debug_assert_eq!(ct.len(), pt.len());
-        ct.append(&mut tag);
+        let len = usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?;
+        if len != pt.len() {
+            return Err(Error::Internal);
+        }
         Ok(ct)
     }
 
@@ -342,9 +340,9 @@ impl Aead {
 
         assert_eq!(self.mode, Mode::Encrypt);
         let mut nonce = xor_nonce(&self.nonce_base, seq);
-        let mut ct = vec![0; pt.len() + TAG_LEN];
+        let mut ct = vec![0; pt.len() + TAG_LEN]; // Tag is written directly into the tail.
         let mut ct_len: c_int = 0;
-        let mut tag = vec![0; TAG_LEN];
+        let ct_ptr = ct.as_mut_ptr();
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
@@ -354,18 +352,19 @@ impl Aead {
                 c_int_len(nonce.len())?,
                 aad.as_ptr(),
                 c_int_len(aad.len())?,
-                ct.as_mut_ptr(),
+                ct_ptr,
                 &raw mut ct_len,
                 c_int_len(ct.len())?,
-                tag.as_mut_ptr(),
-                c_int_len(tag.len())?,
+                ct_ptr.add(pt.len()),
+                c_int_len(TAG_LEN)?,
                 pt.as_ptr(),
                 c_int_len(pt.len())?,
             )
         })?;
-        ct.truncate(usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?);
-        debug_assert_eq!(ct.len(), pt.len());
-        ct.append(&mut tag);
+        let len = usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?;
+        if len != pt.len() {
+            return Err(Error::Internal);
+        }
         Ok(ct)
     }
 
@@ -577,5 +576,44 @@ mod test {
     fn encrypt_with_seq_chacha20poly1305() {
         const KEY: &[u8] = &[0x42; 32];
         roundtrip_encrypt_with_seq(AeadAlgorithms::ChaCha20Poly1305, KEY);
+    }
+
+    #[test]
+    fn encrypt_tag_tamper_detected() {
+        const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
+        const AAD: &[u8] = b"associated";
+        const PT: &[u8] = b"hello sframe";
+        const ALGORITHM: AeadAlgorithms = AeadAlgorithms::Aes128Gcm;
+        const KEY: &[u8] = &[0x42; 16];
+
+        fixture_init();
+
+        let k = Aead::import_key(ALGORITHM, KEY).unwrap();
+        let mut enc = Aead::new(Mode::Encrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
+        let mut ct = enc.encrypt(AAD, PT).unwrap();
+        *ct.last_mut().unwrap() ^= 0xff;
+
+        let mut dec = Aead::new(Mode::Decrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
+        assert!(dec.decrypt(AAD, 0, &ct).is_err());
+    }
+
+    #[test]
+    fn encrypt_with_seq_tag_tamper_detected() {
+        const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
+        const AAD: &[u8] = b"associated";
+        const PT: &[u8] = b"hello sframe";
+        const SEQ: SequenceNumber = 0x0123_4567_89ab;
+        const ALGORITHM: AeadAlgorithms = AeadAlgorithms::Aes128Gcm;
+        const KEY: &[u8] = &[0x42; 16];
+
+        fixture_init();
+
+        let k = Aead::import_key(ALGORITHM, KEY).unwrap();
+        let mut enc = Aead::new(Mode::Encrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
+        let mut ct = enc.encrypt_with_seq(AAD, SEQ, PT).unwrap();
+        *ct.last_mut().unwrap() ^= 0xff;
+
+        let mut dec = Aead::new(Mode::Decrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
+        assert!(dec.decrypt(AAD, SEQ, &ct).is_err());
     }
 }
