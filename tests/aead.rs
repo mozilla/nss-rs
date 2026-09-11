@@ -127,6 +127,24 @@ fn aead_encrypt_in_place_too_small_buffer() {
     assert!(result.is_err());
 }
 
+// encrypt() asserts the RecordProtection was created with Mode::Encrypt.
+#[test]
+#[should_panic(expected = "assertion `left == right` failed")]
+fn aead_encrypt_wrong_mode() {
+    let aead = make_aead(&make_secret(), TLS_AES_128_GCM_SHA256, Mode::Decrypt);
+    let ciphertext_buf = &mut [0; 1024];
+    drop(aead.encrypt(1, AAD, PLAINTEXT, ciphertext_buf));
+}
+
+// decrypt() asserts the RecordProtection was created with Mode::Decrypt.
+#[test]
+#[should_panic(expected = "assertion `left == right` failed")]
+fn aead_decrypt_wrong_mode() {
+    let aead = make_aead(&make_secret(), TLS_AES_128_GCM_SHA256, Mode::Encrypt);
+    let plaintext_buf = &mut [0; 1024];
+    drop(aead.decrypt(1, AAD, PLAINTEXT, plaintext_buf));
+}
+
 #[test]
 fn roundtrip_aes128() {
     common::roundtrip(&make_secret(), TLS_AES_128_GCM_SHA256);

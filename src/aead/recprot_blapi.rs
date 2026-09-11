@@ -18,8 +18,7 @@ use std::{
 use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use super::{
-    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, split_tag,
-    xor_nonce,
+    AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SymKey, Version,
@@ -148,6 +147,8 @@ pub struct RecordProtection {
     #[zeroize(skip)]
     cipher: RecordCipher,
     nonce_base: [u8; NONCE_LEN],
+    #[zeroize(skip)]
+    mode: Mode,
 }
 
 impl RecordProtection {
@@ -200,6 +201,7 @@ impl RecordProtection {
         Ok(Self {
             cipher: record_cipher,
             nonce_base,
+            mode,
         })
     }
 }
@@ -216,6 +218,7 @@ impl RecordProtectionOps for RecordProtection {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
+        assert_eq!(self.mode, Mode::Encrypt);
         if output.len()
             < input
                 .len()
@@ -246,6 +249,7 @@ impl RecordProtectionOps for RecordProtection {
     }
 
     fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
+        assert_eq!(self.mode, Mode::Encrypt);
         if data.len() < self.expansion() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -278,7 +282,11 @@ impl RecordProtectionOps for RecordProtection {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        let (ct_len, mut tag) = split_tag(input)?;
+        assert_eq!(self.mode, Mode::Decrypt);
+        let ct_len = input
+            .len()
+            .checked_sub(TAG_LEN)
+            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
         if output.len() < ct_len {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -291,7 +299,7 @@ impl RecordProtectionOps for RecordProtection {
                 aad,
                 output.as_mut_ptr(),
                 ct_len_c,
-                tag.as_mut_ptr(),
+                input[ct_len..].as_ptr().cast_mut(), // tag ptr is read-only during decrypt
                 input.as_ptr(),
                 ct_len_c,
             )
@@ -300,6 +308,7 @@ impl RecordProtectionOps for RecordProtection {
     }
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
+        assert_eq!(self.mode, Mode::Decrypt);
         let ct_len = data
             .len()
             .checked_sub(TAG_LEN)
