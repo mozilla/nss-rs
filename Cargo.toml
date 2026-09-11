@@ -168,6 +168,7 @@ toml = { version = "0.9", default-features = false, features = ["parse", "serde"
 windows = { version = ">=0.60,<0.63", features = ["Win32_Security_Authentication_Identity"] }
 
 [features]
+default = []
 bench = ["log/release_max_level_info"]
 # Bypass PKCS#11 session layer for RecordProtection AEAD operations by calling
 # freebl directly. Improves performance but skips softoken's FIPS self-test gate.

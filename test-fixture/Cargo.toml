@@ -20,6 +20,7 @@ log = { workspace = true }
 nss-rs = { workspace = true }
 
 [features]
+default = []
 bench = ["nss-rs/bench"]
 disable-random = []
 
