@@ -313,8 +313,9 @@ fn maybe_link_freebl3() -> Option<&'static str> {
 
 /// The archives in `lib_dir`: `nss_static` for `libnss_static.a` and `nss_static.lib`.
 ///
-/// On Windows this also picks up import libraries, as `nss3.dll` from `nss3.dll.lib`.
-/// [`resolve_archive`] never asks for one, and [`installed_static_libs`] drops them.
+/// On Windows this also picks up import libraries: `nss3.dll` from `nss3.dll.lib`, which
+/// [`installed_static_libs`] drops, and NSPR's `libnspr4`, which [`resolve_archive`] asks
+/// for on purpose.
 fn installed_archives(lib_dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(lib_dir) else {
         return Vec::new();
@@ -347,7 +348,9 @@ fn installed_archives(lib_dir: &Path) -> Vec<String> {
 /// `None` where there is no pkg-config to run, which is every target that made
 /// the in-tree parser necessary in the first place.
 fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
-    let output = Command::new("pkg-config")
+    // A cross build's pkg-config is a different binary, named by `PKG_CONFIG`.
+    let pkg_config = env::var("PKG_CONFIG").unwrap_or_else(|_| String::from("pkg-config"));
+    let output = Command::new(pkg_config)
         .args(["--libs-only-l", "--static", module])
         .output()
         .ok()?;
@@ -431,14 +434,16 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
         let Some(required_libs) =
             pkg_config_libs(pc_dir, &required, seen).or_else(|| system_pkg_config_libs(&required))
         else {
-            // Name the file that is actually missing; the caller only knows that
-            // the module it asked for could not be resolved.
+            // Keep what this file did describe. Discarding it would fall back to
+            // guessing from the installed archives, which for the case that gets
+            // here - `--system-nspr`, which writes the requirement but installs
+            // neither the `.pc` nor the archives - cannot supply the module either.
             println!(
-                "cargo:warning=no {}, required by {module}.pc, and no system \
-                 pkg-config to ask; guessing the libraries to link instead",
+                "cargo:warning=no {}, required by {module}.pc, and pkg-config \
+                 could not supply it; linking without it",
                 pc_dir.join(format!("{required}.pc")).display()
             );
-            return None;
+            continue;
         };
         libs.extend(required_libs);
     }
@@ -866,6 +871,7 @@ fn main() {
     for var in [
         "NSS_DIR",
         "NSS_PREBUILT",
+        "PKG_CONFIG",
         "PKG_CONFIG_PATH",
         "PKG_CONFIG_LIBDIR",
         "PKG_CONFIG_SYSROOT_DIR",
