@@ -66,7 +66,7 @@ fn keygen_p256() {
     let alt = key.public.key_data_alt().unwrap();
     assert_eq!(67, alt.len());
     assert_eq!(&[4, 65, 4], &alt[0..3]);
-    assert_eq!(&alt[2..], raw.as_slice());
+    assert_eq!(&alt[2..], raw);
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn keygen_p384() {
     let alt = key.public.key_data_alt().unwrap();
     assert_eq!(99, alt.len());
     assert_eq!(&[4, 97, 4], &alt[0..3]);
-    assert_eq!(&alt[2..], raw.as_slice());
+    assert_eq!(&alt[2..], raw);
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn keygen_p521() {
     let alt = key.public.key_data_alt().unwrap();
     assert_eq!(136, alt.len());
     assert_eq!(&[4, 129, 133, 4], &alt[0..4]);
-    assert_eq!(&alt[3..], raw.as_slice());
+    assert_eq!(&alt[3..], raw);
 }
 
 #[test]
