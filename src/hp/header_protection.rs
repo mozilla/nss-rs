@@ -80,7 +80,7 @@ impl Key {
                 &raw mut secret,
             )
         }?;
-        let key = SymKey::from_ptr(secret).or(Err(Error::Hkdf))?;
+        let key = SymKey::from_ptr(secret)?;
         let kind = make_kind(key)?;
 
         debug_assert_eq!(
