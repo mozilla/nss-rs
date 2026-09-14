@@ -166,16 +166,11 @@ fn xor_nonce(base: &[u8; NONCE_LEN], count: SequenceNumber) -> [u8; NONCE_LEN] {
 /// All of the AEAD functions here have a tag of this length, so use a fixed offset.
 const TAG_LEN: usize = 16;
 
-/// Split `data` into `(ct_len, tag)`, returning `SEC_ERROR_BAD_DATA` if it is
-/// too short to contain a tag.
-fn split_tag(data: &[u8]) -> Res<(usize, [u8; TAG_LEN])> {
-    let ct_len = data
-        .len()
-        .checked_sub(TAG_LEN)
-        .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
-    let mut tag = [0u8; TAG_LEN];
-    tag.copy_from_slice(&data[ct_len..]);
-    Ok((ct_len, tag))
+/// Split `data` into `(ciphertext, tag)`, returning `SEC_ERROR_BAD_DATA` if it
+/// is too short to contain a tag.
+fn split_tag(data: &[u8]) -> Res<(&[u8], &[u8; TAG_LEN])> {
+    data.split_last_chunk()
+        .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))
 }
 
 pub type SequenceNumber = u64;

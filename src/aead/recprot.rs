@@ -196,10 +196,11 @@ impl RecordProtectionOps for RecordProtection {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        let (ct_len, mut tag) = split_tag(input)?;
-        if output.len() < ct_len {
+        let (ct, tag) = split_tag(input)?;
+        if output.len() < ct.len() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
+        let mut tag = *tag;
         let out_len = unsafe {
             aead_op(
                 &self.ctx,
@@ -209,26 +210,30 @@ impl RecordProtectionOps for RecordProtection {
                 output.as_mut_ptr(),
                 output.len(),
                 tag.as_mut_ptr(),
-                input.as_ptr(),
-                ct_len,
+                ct.as_ptr(),
+                ct.len(),
             )
         }?;
         Ok(&output[..out_len])
     }
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-        let (ct_len, mut tag) = split_tag(data)?;
-        let data_ptr = data.as_mut_ptr();
+        let ct_len = data
+            .len()
+            .checked_sub(TAG_LEN)
+            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
+        let (ct, tag) = data.split_at_mut(ct_len);
+        let ct_ptr = ct.as_mut_ptr();
         let out_len = unsafe {
             aead_op(
                 &self.ctx,
                 &self.nonce_base,
                 count,
                 aad,
-                data_ptr,
-                data.len(),
+                ct_ptr,
+                ct_len,
                 tag.as_mut_ptr(),
-                data_ptr.cast_const(),
+                ct_ptr.cast_const(),
                 ct_len,
             )
         }?;
