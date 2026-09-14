@@ -345,25 +345,31 @@ fn installed_archives(lib_dir: &Path) -> Vec<String> {
 /// archives, yet still writes `Requires: nspr` into `nss-static.pc`. The system
 /// NSPR that satisfies it brings its own `.pc`, so ask for it the usual way.
 ///
+/// Its `-L` is searched as well: a module reached this way is by definition not
+/// in the dist, so it need not be anywhere the linker already looks.
+///
 /// `None` where there is no pkg-config to run, which is every target that made
 /// the in-tree parser necessary in the first place.
 fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
     // A cross build's pkg-config is a different binary, named by `PKG_CONFIG`.
     let pkg_config = env::var("PKG_CONFIG").unwrap_or_else(|_| String::from("pkg-config"));
     let output = Command::new(pkg_config)
-        .args(["--libs-only-l", "--static", module])
+        .args(["--libs", "--static", module])
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
-    let libs = String::from_utf8(output.stdout).ok()?;
-    Some(
-        libs.split_whitespace()
-            .filter_map(|flag| flag.strip_prefix("-l"))
-            .map(String::from)
-            .collect(),
-    )
+    let flags = String::from_utf8(output.stdout).ok()?;
+    let mut libs = Vec::new();
+    for flag in flags.split_whitespace() {
+        if let Some(lib) = flag.strip_prefix("-l") {
+            libs.push(String::from(lib));
+        } else if let Some(dir) = flag.strip_prefix("-L") {
+            println!("cargo:rustc-link-search=native={dir}");
+        }
+    }
+    Some(libs)
 }
 
 /// The module names in the pkg-config `Requires:` field without version constraints.
@@ -469,10 +475,12 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
 /// The libraries to link, guessed from the `archives` that are installed, for a
 /// dist that has no `nss-static.pc`.
 ///
-/// Only Android gets here. Its NSS comes from application-services'
+/// Android is the case this exists for: its NSS comes from application-services'
 /// `build-nss-android.sh`, which drives gyp directly and so never runs the
 /// `build.sh` that writes the file. That dist is a hand-picked set of archives,
-/// which is the case this guessing handles well.
+/// which is the case this guessing handles well. Anything else lacking the file
+/// lands here too: `setup_standalone` does not check the NSS version, so a
+/// prebuilt dist older than our floor is guessed at rather than rejected.
 ///
 /// Take whatever is installed and drop what would define a symbol twice:
 ///
