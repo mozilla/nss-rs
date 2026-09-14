@@ -318,7 +318,7 @@ impl Aead {
                 c_int_len(pt.len())?,
             )
         })?;
-        let len = usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?;
+        let len = usize::try_from(ct_len)?;
         if len != pt.len() {
             return Err(Error::Internal);
         }
@@ -361,7 +361,7 @@ impl Aead {
                 c_int_len(pt.len())?,
             )
         })?;
-        let len = usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?;
+        let len = usize::try_from(ct_len)?;
         if len != pt.len() {
             return Err(Error::Internal);
         }
@@ -429,9 +429,17 @@ mod test {
         let ciphertext = enc.encrypt(aad, pt).unwrap();
         assert_eq!(&ciphertext[..], ct);
 
+        // A fresh context's internal counter starts at zero, so this must match `encrypt`.
+        let mut enc_seq = Aead::new(Mode::Encrypt, algorithm, &k, *nonce).unwrap();
+        assert_eq!(enc_seq.encrypt_with_seq(aad, 0, pt).unwrap(), ciphertext);
+
         let mut dec = Aead::new(Mode::Decrypt, algorithm, &k, *nonce).unwrap();
         let plaintext = dec.decrypt(aad, 0, ct).unwrap();
         assert_eq!(&plaintext[..], pt);
+
+        let mut tampered = ct.to_vec();
+        *tampered.last_mut().unwrap() ^= 0xff;
+        assert!(dec.decrypt(aad, 0, &tampered).is_err());
     }
 
     fn decrypt(
@@ -576,44 +584,5 @@ mod test {
     fn encrypt_with_seq_chacha20poly1305() {
         const KEY: &[u8] = &[0x42; 32];
         roundtrip_encrypt_with_seq(AeadAlgorithms::ChaCha20Poly1305, KEY);
-    }
-
-    #[test]
-    fn encrypt_tag_tamper_detected() {
-        const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
-        const AAD: &[u8] = b"associated";
-        const PT: &[u8] = b"hello sframe";
-        const ALGORITHM: AeadAlgorithms = AeadAlgorithms::Aes128Gcm;
-        const KEY: &[u8] = &[0x42; 16];
-
-        fixture_init();
-
-        let k = Aead::import_key(ALGORITHM, KEY).unwrap();
-        let mut enc = Aead::new(Mode::Encrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
-        let mut ct = enc.encrypt(AAD, PT).unwrap();
-        *ct.last_mut().unwrap() ^= 0xff;
-
-        let mut dec = Aead::new(Mode::Decrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
-        assert!(dec.decrypt(AAD, 0, &ct).is_err());
-    }
-
-    #[test]
-    fn encrypt_with_seq_tag_tamper_detected() {
-        const NONCE_BASE: [u8; NONCE_LEN] = [0; NONCE_LEN];
-        const AAD: &[u8] = b"associated";
-        const PT: &[u8] = b"hello sframe";
-        const SEQ: SequenceNumber = 0x0123_4567_89ab;
-        const ALGORITHM: AeadAlgorithms = AeadAlgorithms::Aes128Gcm;
-        const KEY: &[u8] = &[0x42; 16];
-
-        fixture_init();
-
-        let k = Aead::import_key(ALGORITHM, KEY).unwrap();
-        let mut enc = Aead::new(Mode::Encrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
-        let mut ct = enc.encrypt_with_seq(AAD, SEQ, PT).unwrap();
-        *ct.last_mut().unwrap() ^= 0xff;
-
-        let mut dec = Aead::new(Mode::Decrypt, ALGORITHM, &k, NONCE_BASE).unwrap();
-        assert!(dec.decrypt(AAD, SEQ, &ct).is_err());
     }
 }
