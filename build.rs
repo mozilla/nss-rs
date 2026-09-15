@@ -349,27 +349,23 @@ fn installed_archives(lib_dir: &Path) -> Vec<String> {
 /// in the dist, so it need not be anywhere the linker already looks.
 ///
 /// `None` where there is no pkg-config to run, which is every target that made
-/// the in-tree parser necessary in the first place.
+/// the in-tree parser necessary in the first place, and for a cross build that
+/// has not said which pkg-config to trust.
 fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
-    // A cross build's pkg-config is a different binary, named by `PKG_CONFIG`.
-    let pkg_config = env::var("PKG_CONFIG").unwrap_or_else(|_| String::from("pkg-config"));
-    let output = Command::new(pkg_config)
-        .args(["--libs", "--static", module])
-        .output()
+    // Via the crate rather than the binary: it honours `PKG_CONFIG` and the
+    // target-suffixed `PKG_CONFIG_*`, rewrites `PKG_CONFIG_SYSROOT_DIR`, and
+    // refuses a host pkg-config in a cross build rather than reporting the
+    // host's libraries for the target.
+    let library = pkg_config::Config::new()
+        .statik(true)
+        .cargo_metadata(false)
+        .env_metadata(true)
+        .probe(module)
         .ok()?;
-    if !output.status.success() {
-        return None;
+    for dir in &library.link_paths {
+        println!("cargo:rustc-link-search=native={}", dir.display());
     }
-    let flags = String::from_utf8(output.stdout).ok()?;
-    let mut libs = Vec::new();
-    for flag in flags.split_whitespace() {
-        if let Some(lib) = flag.strip_prefix("-l") {
-            libs.push(String::from(lib));
-        } else if let Some(dir) = flag.strip_prefix("-L") {
-            println!("cargo:rustc-link-search=native={dir}");
-        }
-    }
-    Some(libs)
+    Some(library.libs)
 }
 
 /// The module names in the pkg-config `Requires:` field without version constraints.
@@ -527,14 +523,17 @@ fn installed_static_libs(archives: &[String]) -> Vec<String> {
 /// objects want the `__imp_` symbols that only the import library defines.
 /// Linking `libnspr4_s.lib` to satisfy `-lnspr4` leaves those undefined.
 fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a String> {
-    [
-        name.to_owned(),
-        format!("lib{name}"),
-        format!("{name}_s"),
-        format!("lib{name}_s"),
-    ]
-    .iter()
-    .find_map(|candidate| archives.get(candidate))
+    // Every library but NSPR on Windows matches verbatim, so spell that case out
+    // rather than building the alternatives it will not need.
+    archives.get(name).or_else(|| {
+        [
+            format!("lib{name}"),
+            format!("{name}_s"),
+            format!("lib{name}_s"),
+        ]
+        .iter()
+        .find_map(|candidate| archives.get(candidate))
+    })
 }
 
 fn static_link(lib_dir: &Path) -> Vec<String> {
@@ -880,6 +879,7 @@ fn main() {
         "NSS_DIR",
         "NSS_PREBUILT",
         "PKG_CONFIG",
+        "PKG_CONFIG_ALLOW_CROSS",
         "PKG_CONFIG_PATH",
         "PKG_CONFIG_LIBDIR",
         "PKG_CONFIG_SYSROOT_DIR",
