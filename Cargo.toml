@@ -23,9 +23,9 @@ exclude = [
 
 [package.metadata.nss]
 # Minimum NSS version required for nss-rs.
-min-version = "3.128"
+min-version = "3.129"
 # SHA256 of the 'nss-<min-version>-with-nspr-<some-version>.tar.gz' release tarball.
-sha256 = "bfd84218ee9b0b24775723eb62bdf4590bf21a3818e8210d37de0b2c2db79750"
+sha256 = "d389064d5e5ef09d597f8ae8dadc066f71e97b982bd7418b835686425fc3a189"
 
 [package.metadata.cargo-machete]
 ignored = ["bindgen", "semver", "serde", "serde_derive", "toml"]
