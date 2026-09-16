@@ -30,20 +30,6 @@ pub enum HmacAlgorithm {
     HMAC_SHA2_512,
 }
 
-#[deprecated = "use HmacAlgorithm::hash_alg instead"]
-#[expect(clippy::trivially_copy_pass_by_ref, reason = "API compatibility")]
-#[must_use]
-pub const fn hmac_alg_to_hash_alg(alg: &HmacAlgorithm) -> HashAlgorithm {
-    alg.hash_alg()
-}
-
-#[deprecated = "use HmacAlgorithm::hmac_len instead"]
-#[expect(clippy::trivially_copy_pass_by_ref, reason = "API compatibility")]
-#[must_use]
-pub const fn hmac_alg_to_hmac_len(alg: &HmacAlgorithm) -> usize {
-    alg.hmac_len()
-}
-
 /// Calculate the HMAC of `data` using a `key` as bytes.
 ///
 /// If using the same `key` multiple times, use [`HmacAlgorithm::import_key()`] and

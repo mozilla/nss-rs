@@ -190,24 +190,3 @@ fn hmac512() {
         .expect("key128/old_hmac")
     );
 }
-
-#[expect(deprecated)]
-#[test]
-fn deprecated_functions() {
-    use nss_rs::{
-        hash::{HashAlgorithm, hash_alg_to_hash_len},
-        hmac::{hmac_alg_to_hash_alg, hmac_alg_to_hmac_len},
-    };
-
-    for (alg, hash) in [
-        (HmacAlgorithm::HMAC_SHA2_256, HashAlgorithm::SHA2_256),
-        (HmacAlgorithm::HMAC_SHA2_384, HashAlgorithm::SHA2_384),
-        (HmacAlgorithm::HMAC_SHA2_512, HashAlgorithm::SHA2_512),
-    ] {
-        let hash_len = hash_alg_to_hash_len(&hash);
-        assert_eq!(alg.hash_alg(), hash);
-        assert_eq!(hmac_alg_to_hash_alg(&alg), hash);
-        assert_eq!(alg.hmac_len(), hash_len);
-        assert_eq!(hmac_alg_to_hmac_len(&alg), hash_len);
-    }
-}
