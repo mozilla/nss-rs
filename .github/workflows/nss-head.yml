@@ -80,7 +80,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
+      - uses: mozilla/actions/rust@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
         with:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -89,7 +89,7 @@ jobs:
       - id: meta
         uses: $/.github/actions/nss-metadata
 
-      - uses: mozilla/actions/nss@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
+      - uses: mozilla/actions/nss@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
         with:
           deps-only: true
 
