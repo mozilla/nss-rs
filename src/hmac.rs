@@ -91,8 +91,8 @@ impl HmacAlgorithm {
                 SECItemBorrowed::wrap(key)?.as_mut(),
                 ptr::null_mut(),
             )
-            .into_result()?
-        };
+        }
+        .into_result()?;
         Ok(sym_key)
     }
 
@@ -100,21 +100,17 @@ impl HmacAlgorithm {
     pub fn hmac(self, key: &SymKey, data: &[u8]) -> Result<Vec<u8>, Error> {
         crate::init()?;
 
-        let Ok(data_len) = u32::try_from(data.len()) else {
-            return Err(Error::Internal);
-        };
+        let data_len = u32::try_from(data.len())?;
 
         let param = SECItemBorrowed::make_empty();
-        let context = unsafe {
-            PK11_CreateContextBySymKey(self.ckm(), CKA_SIGN, **key, param.as_ref()).into_result()?
-        };
+        let context =
+            unsafe { PK11_CreateContextBySymKey(self.ckm(), CKA_SIGN, **key, param.as_ref()) }
+                .into_result()?;
 
-        unsafe {
-            PK11_DigestOp(*context, data.as_ptr(), data_len).into_result()?;
-        }
+        unsafe { PK11_DigestOp(*context, data.as_ptr(), data_len) }.into_result()?;
 
         let expected_len = self.hmac_len();
-        let expected_len_u32 = expected_len.try_into().map_err(|_| Error::Internal)?;
+        let expected_len_u32 = expected_len.try_into()?;
         let mut digest = vec![0u8; expected_len];
         let mut digest_len = 0u32;
         unsafe {
@@ -124,8 +120,9 @@ impl HmacAlgorithm {
                 &raw mut digest_len,
                 expected_len_u32,
             )
-            .into_result()?;
         }
+        .into_result()?;
+
         if digest_len != expected_len_u32 {
             return Err(Error::Internal);
         }
