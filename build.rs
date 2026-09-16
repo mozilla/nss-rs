@@ -387,11 +387,14 @@ fn required_modules(field: &str) -> impl Iterator<Item = String> {
 
 /// The `-l` names in `<module>.pc`, then those of everything it requires.
 ///
-/// Not pkg-config: resolves modules within `pc_dir` only, and reads only `Libs`,
-/// `Libs.private` and `Requires`. `-L` is `${libdir}`, which the caller already
-/// searches. Shelling out to the real thing would give us variable expansion and
-/// `Requires` for free, but it is not there to shell out to on the Windows and
-/// Android builds that need this.
+/// This only looks at `-l` items in `libs[.private]:` directives and
+/// the unversioned portion of `requires[.private]:` directives.
+/// It does not expand variables.
+/// `-L` options are assumed to be already on the search path.
+///
+/// Shelling out to the real thing would give us these for free, but it is not
+/// there to shell out to on the Windows and Android builds that need this.
+/// NSS and NSPR builds produce ".pc" files that don't need those features.
 ///
 /// Each module is emitted once, at its first mention, which for a graph deeper
 /// than NSS's `nss-static` -> `nspr` need not be a correct link order.
@@ -465,7 +468,7 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
 /// Android is the case this exists for: its NSS comes from application-services'
 /// `build-nss-android.sh`, which drives gyp directly and so never runs the
 /// `build.sh` that writes the file. That dist is a hand-picked set of archives,
-/// which is the case this guessing handles well. Anything else lacking the file
+/// which is the case this guessing handles well. Anything else lacking a ".pc" file
 /// lands here too: `setup_standalone` does not check the NSS version, so a
 /// prebuilt dist older than our floor is guessed at rather than rejected.
 ///
