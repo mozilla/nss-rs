@@ -152,7 +152,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@07366ff288a2661e3998b69c5d48eda270050635 # v1.4.8
+      uses: vmactions/netbsd-vm@7f23a491dcc69c34195721ab67934917707f84c7 # v1.4.9
       with:
         # renovate: depName=netbsd datasource=netbsd-releases
         release: "10.1"
