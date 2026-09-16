@@ -370,28 +370,19 @@ fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
 
 /// The module names in the pkg-config `Requires:` field without version constraints.
 ///
-/// A constraint needs no surrounding space, so `nspr >= 4.40`, `nspr >=4.40` and
-/// `nspr>=4.40` all name just `nspr`.
-fn required_modules(field: &str) -> Vec<String> {
-    let mut modules = Vec::new();
-    let mut skip_version = false;
-    for token in field.split([',', ' ', '\t']).filter(|t| !t.is_empty()) {
-        if std::mem::take(&mut skip_version) {
-            continue;
-        }
-        let Some(op) = token.find(['<', '>', '=', '!']) else {
-            modules.push(token.to_owned());
-            continue;
-        };
-        if op > 0 {
-            modules.push(token[..op].to_owned());
-        }
-        // The version follows the operator, unless the token ends at it.
-        skip_version = token[op..]
-            .trim_start_matches(['<', '>', '=', '!'])
-            .is_empty();
-    }
-    modules
+/// Each comma-separated entry names a module, optionally followed by a version
+/// constraint that needs no surrounding space: `nspr >= 4.40`, `nspr >=4.40` and
+/// `nspr>=4.40` all name just `nspr`. An entry may also name several modules, in
+/// which case only the last of them can carry a constraint - enough for the files
+/// NSS and NSPR write.
+fn required_modules(field: &str) -> impl Iterator<Item = String> {
+    field.split(',').flat_map(|entry| {
+        entry
+            .split_once(['<', '>', '=', '!'])
+            .map_or(entry, |(names, _version)| names)
+            .split_whitespace()
+            .map(String::from)
+    })
 }
 
 /// The `-l` names in `<module>.pc`, then those of everything it requires.
