@@ -14,6 +14,9 @@ inputs:
   bindgen-args:
     description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
     default: ""
+  nss-min-version:
+    description: "Minimum NSS version required by nss-rs; platforms with an older system NSS are skipped."
+    required: true
 
 runs:
   using: composite
@@ -25,6 +28,7 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
         BINDGEN_ARGS: ${{ inputs.bindgen-args }}
+        NSS_MIN_VERSION: ${{ inputs.nss-min-version }}
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
@@ -53,8 +57,11 @@ runs:
         cat <<EOF > run.sh
           # This executes as user
           set -ex
+          ROOT=\$(pwd)
           cd "$WD"
           pwd
+          sh "\$ROOT/.github/scripts/nss-version-check.sh" '$NSS_MIN_VERSION' '$PLATFORM'
+          if [ -f nss-skipped.md ]; then exit 0; fi
           case "$PLATFORM" in
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
@@ -174,6 +181,16 @@ runs:
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
+    - name: Report a skipped platform
+      id: skipped
+      shell: bash
+      env:
+        SKIPPED: ${{ inputs.working-directory }}/nss-skipped.md
+      run: |
+        test -f "$SKIPPED" || exit 0
+        cat "$SKIPPED" >> "$GITHUB_STEP_SUMMARY"
+        echo "skipped=true" >> "$GITHUB_OUTPUT"
+
     - id: check-coverage
       shell: bash
       env:
@@ -190,7 +207,7 @@ runs:
         verbose: true
         flags: ${{ inputs.platform }}
 
-    - if: ${{ always() && inputs.bindgen-args != '' }}
+    - if: ${{ always() && inputs.bindgen-args != '' && steps.skipped.outputs.skipped != 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: bindings-${{ inputs.platform }}
