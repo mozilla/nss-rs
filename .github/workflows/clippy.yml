@@ -51,7 +51,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
 
-      - uses: ./install-nss
+      - uses: $/install-nss
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 

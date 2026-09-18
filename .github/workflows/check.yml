@@ -25,11 +25,12 @@ defaults:
     shell: bash
 
 jobs:
-  toolchains:
-    name: Determine toolchains
+  metadata:
+    name: Read crate metadata
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
+      nss-min-version: ${{ steps.nss-meta.outputs.min-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,27 +39,17 @@ jobs:
       - id: toolchains
         uses: mozilla/actions/toolchains@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
 
-  nss-meta:
-    name: Determine minimum NSS version
-    runs-on: ubuntu-24.04
-    outputs:
-      min-version: ${{ steps.meta.outputs.min-version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - id: meta
+      - id: nss-meta
         uses: $/.github/actions/nss-metadata
 
   check:
     name: Run checks
-    needs: toolchains
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
-        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(needs.metadata.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
@@ -98,7 +89,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
 
-      - uses: ./install-nss
+      - uses: $/install-nss
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -203,7 +194,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-android
+      - uses: $/.github/actions/check-android
         with:
           target: ${{ matrix.target }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -222,12 +213,10 @@ jobs:
   check-distro:
     name: Check with system NSS on ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    needs: nss-meta
+    needs: metadata
     # Tests the pkg-config codepath against distro-packaged NSS. Some distros
     # omit -L for default library search paths (e.g., /usr/lib64 on Fedora/RHEL),
     # which the Ubuntu CI runners don't exercise.
-    # Allow failures in merge queue in case distro NSS lags our minimum version.
-    continue-on-error: ${{ github.event_name == 'merge_group' }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags || '' }}
     strategy:
@@ -292,13 +281,8 @@ jobs:
         id: nss
         env:
           NAME: ${{ matrix.name }}
-          NSS_MIN_VERSION: ${{ needs.nss-meta.outputs.min-version }}
-        run: |
-          sh .github/scripts/nss-version-check.sh "$NSS_MIN_VERSION" "$NAME"
-          if [ -f nss-skipped.md ]; then
-            cat nss-skipped.md >> "$GITHUB_STEP_SUMMARY"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
+          NSS_MIN_VERSION: ${{ needs.metadata.outputs.nss-min-version }}
+        run: sh .github/scripts/nss-version-check.sh "$NSS_MIN_VERSION" "$NAME"
 
       - name: Install Rust
         if: steps.nss.outputs.skip != 'true'
@@ -330,20 +314,17 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
-    needs: nss-meta
-    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
-    # Allow them to fail without aborting the merge queue.
-    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
-        os: [freebsd, netbsd, openbsd] # NSS package on 'solaris' is too old.
+        os: [freebsd, netbsd, openbsd, solaris]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: $/.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
-          nss-min-version: ${{ needs.nss-meta.outputs.min-version }}
+          nss-min-version: ${{ needs.metadata.outputs.nss-min-version }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]

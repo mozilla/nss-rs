@@ -1,24 +1,36 @@
 #!/bin/sh
-# Check the system NSS against the minimum version nss-rs requires, so that CI
-# can skip a platform whose NSS is too old instead of failing on it. Writes the
-# reason as a job summary fragment to ./nss-skipped.md, which is also the
-# caller's signal to skip; in a VM, the host publishes it after the run.
-# POSIX sh, because this also runs on the BSDs and on Alpine.
-# Usage: nss-version-check.sh <min-version> <label>
+# Skip, don't fail, a platform whose system NSS is too old for nss-rs; a missing
+# nss.pc is a broken install, so that fails. Usage: <min-version> <label>
 set -eu
 
 MIN_VERSION=${1:?a minimum NSS version is required}
 LABEL=${2:?a platform label is required}
 
-if ! pkg-config --exists nss; then
-  echo "::warning::No nss.pc on $LABEL, cannot check the NSS version"
+# Match build.rs: the pkg-config crate honours $PKG_CONFIG, else pkgconf.
+if [ -z "${PKG_CONFIG:-}" ]; then
+  if command -v pkg-config > /dev/null 2>&1; then
+    PKG_CONFIG=pkg-config
+  elif command -v pkgconf > /dev/null 2>&1; then
+    PKG_CONFIG=pkgconf
+  else
+    echo "::error::No pkg-config on $LABEL; the NSS package install is broken"
+    exit 1
+  fi
+fi
+
+if ! "$PKG_CONFIG" --exists nss; then
+  echo "::error::No nss.pc on $LABEL; the NSS package install is broken"
+  exit 1
+fi
+
+if "$PKG_CONFIG" --atleast-version="$MIN_VERSION" nss; then
   exit 0
 fi
 
-if pkg-config --atleast-version="$MIN_VERSION" nss; then
-  exit 0
-fi
-
-REASON="Skipping $LABEL: system NSS $(pkg-config --modversion nss) is older than the required $MIN_VERSION"
+REASON="Skipping $LABEL: system NSS $("$PKG_CONFIG" --modversion nss) is older than the required $MIN_VERSION"
 echo "::warning::$REASON"
 echo "### $REASON" > nss-skipped.md
+
+# A VM shares no environment with the runner; its host reads nss-skipped.md.
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then cat nss-skipped.md >> "$GITHUB_STEP_SUMMARY"; fi
+if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
