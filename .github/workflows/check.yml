@@ -38,6 +38,19 @@ jobs:
       - id: toolchains
         uses: mozilla/actions/toolchains@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
 
+  nss-meta:
+    name: Determine minimum NSS version
+    runs-on: ubuntu-24.04
+    outputs:
+      min-version: ${{ steps.meta.outputs.min-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: meta
+        uses: $/.github/actions/nss-metadata
+
   check:
     name: Run checks
     needs: toolchains
@@ -209,6 +222,7 @@ jobs:
   check-distro:
     name: Check with system NSS on ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    needs: nss-meta
     # Tests the pkg-config codepath against distro-packaged NSS. Some distros
     # omit -L for default library search paths (e.g., /usr/lib64 on Fedora/RHEL),
     # which the Ubuntu CI runners don't exercise.
@@ -274,7 +288,20 @@ jobs:
             echo "LIBCLANG_PATH=$(dirname "$CLANG_LIB")" >> "$GITHUB_ENV"
           fi
 
+      - name: Check system NSS version
+        id: nss
+        env:
+          NAME: ${{ matrix.name }}
+          NSS_MIN_VERSION: ${{ needs.nss-meta.outputs.min-version }}
+        run: |
+          sh .github/scripts/nss-version-check.sh "$NSS_MIN_VERSION" "$NAME"
+          if [ -f nss-skipped.md ]; then
+            cat nss-skipped.md >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Rust
+        if: steps.nss.outputs.skip != 'true'
         run: |
           if command -v rustup > /dev/null 2>&1; then
             rustup toolchain install stable --profile minimal
@@ -286,11 +313,13 @@ jobs:
           [ -f "$HOME/.cargo/env" ] || touch "$HOME/.cargo/env"
 
       - name: Build
+        if: steps.nss.outputs.skip != 'true'
         run: |
           . "$HOME/.cargo/env"
           cargo build --locked --all-targets
 
       - name: Build feature powerset
+        if: steps.nss.outputs.skip != 'true'
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
@@ -301,6 +330,7 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
+    needs: nss-meta
     # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
     # Allow them to fail without aborting the merge queue.
     continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
@@ -315,4 +345,5 @@ jobs:
       - uses: ./.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
+          nss-min-version: ${{ needs.nss-meta.outputs.min-version }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
