@@ -6,7 +6,7 @@ This is work in progress and major changes are expected. API stability is NOT a 
 
 ## Building
 
-NSS is located with `pkg-config` by default. If that fails, NSS and NSPR are cloned from `hg.mozilla.org` into `OUT_DIR` and built from source. Set `NSS_DIR` to an absolute path to an NSS checkout to use that instead, and `NSS_PREBUILT` to a value other than `0` if that checkout is already built.
+NSS is located with `pkg-config` by default. If that fails, NSS (pinned to the `NSS_<min-version>_RTM` tag) and a matching NSPR are cloned from GitHub into `OUT_DIR` and built from source; that requires `git`, `gyp` and `ninja` on `PATH`. Set `NSS_DIR` to an absolute path to an NSS checkout to use that instead, and `NSS_PREBUILT` to a value other than `0` if that checkout is already built.
 
 When cross-compiling, `pkg-config` is only consulted if `PKG_CONFIG_ALLOW_CROSS` is set to a value other than `0`, or if `PKG_CONFIG` or `PKG_CONFIG_SYSROOT_DIR` (optionally target-suffixed) is set. Otherwise NSS is built from source.
 

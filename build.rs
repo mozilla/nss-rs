@@ -160,33 +160,83 @@ fn setup_clang() {
     }
 }
 
-fn nss_dir() -> String {
+/// A `git` command that ignores `GIT_DIR`/`GIT_WORK_TREE`, and fails rather than prompting.
+fn git() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    cmd
+}
+
+/// Run `git <args>` in `dest`, returning its stdout if it exits successfully.
+fn git_in(dest: &Path, args: &[&str]) -> Option<String> {
+    let out = git().arg("-C").arg(dest).args(args).output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Whether the git checkout at `dest` has tag `tag` pointing at its `HEAD`.
+fn git_at_tag(dest: &Path, tag: &str) -> bool {
+    git_in(dest, &["tag", "--points-at", "HEAD"]).is_some_and(|out| out.lines().any(|t| t == tag))
+}
+
+/// Clone `url` into `dest`, reusing an existing checkout only if already at `tag`.
+/// Returns whether it cloned.
+fn git_clone(url: &str, dest: &Path, tag: &str) -> bool {
+    if dest.exists() {
+        if git_at_tag(dest, tag) {
+            return false;
+        }
+        fs::remove_dir_all(dest)
+            .unwrap_or_else(|e| panic!("can't remove stale {}: {e}", dest.display()));
+    }
+
+    let status = git()
+        .args(["clone", "--depth=1", "--branch", tag])
+        .arg(url)
+        .arg(dest)
+        .status()
+        .unwrap_or_else(|e| panic!("can't run git: {e}"));
+    assert!(status.success(), "failed to clone {url} at {tag}");
+    true
+}
+
+/// The release tag for `product` at `version`, e.g. `NSS_3_126_RTM`.
+fn rtm_tag(product: &str, version: &str) -> String {
+    format!("{product}_{}_RTM", version.replace('.', "_"))
+}
+
+fn nss_dir(min_version: &str) -> String {
     let dir = env::var("NSS_DIR").map_or_else(
         |_| {
             let out_dir = env::var("OUT_DIR").unwrap();
-            let dir = Path::new(&out_dir).join("nss");
-            if !dir.exists() {
-                Command::new("hg")
-                    .args([
-                        "clone",
-                        "https://hg.mozilla.org/projects/nss",
-                        dir.to_str().unwrap(),
-                    ])
-                    .status()
-                    .expect("can't clone nss");
-            }
+            let nss_dir = Path::new(&out_dir).join("nss");
+            let tag = rtm_tag("NSS", min_version);
+            let nss_cloned = git_clone("https://github.com/mozilla/nss.git", &nss_dir, &tag);
+
+            let nspr_version_file = nss_dir.join("automation/release/nspr-version.txt");
+            let nspr_version = fs::read_to_string(nspr_version_file)
+                .expect("can't read NSPR version required by this NSS release");
+            let nspr_version = nspr_version
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .expect("no NSPR version on the first line of nspr-version.txt");
+            let nspr_tag = rtm_tag("NSPR", nspr_version);
             let nspr_dir = Path::new(&out_dir).join("nspr");
-            if !nspr_dir.exists() {
-                Command::new("hg")
-                    .args([
-                        "clone",
-                        "https://hg.mozilla.org/projects/nspr",
-                        nspr_dir.to_str().unwrap(),
-                    ])
-                    .status()
-                    .expect("can't clone nspr");
+            let nspr_cloned =
+                git_clone("https://github.com/mozilla/nspr.git", &nspr_dir, &nspr_tag);
+
+            // build.sh writes to ../dist and never cleans it, so a stale tag's artifacts persist.
+            let dist = Path::new(&out_dir).join("dist");
+            if (nss_cloned || nspr_cloned) && dist.exists() {
+                fs::remove_dir_all(&dist)
+                    .unwrap_or_else(|e| panic!("can't remove stale {}: {e}", dist.display()));
             }
-            dir
+            nss_dir
         },
         |dir| {
             let path = PathBuf::from(dir.trim());
@@ -704,7 +754,7 @@ fn main() {
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
     } else {
-        setup_pkg_config(&min_version).unwrap_or_else(|| setup_standalone(nss_dir()))
+        setup_pkg_config(&min_version).unwrap_or_else(|| setup_standalone(nss_dir(&min_version)))
     };
 
     for (k, v) in &config {
