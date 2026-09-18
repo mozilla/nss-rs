@@ -30,6 +30,7 @@ runs:
 
     - uses: $/install-nss
       with:
+        working-directory: ${{ inputs.working-directory }}
         target: ${{ inputs.target }}
         token: ${{ inputs.github-token }}
 
