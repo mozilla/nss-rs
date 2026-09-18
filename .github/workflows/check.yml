@@ -85,7 +85,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
 
-      - uses: ./install-nss
+      - uses: $/install-nss
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -190,7 +190,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-android
+      - uses: $/.github/actions/check-android
         with:
           target: ${{ matrix.target }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -312,7 +312,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: $/.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]

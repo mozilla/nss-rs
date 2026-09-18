@@ -42,7 +42,7 @@ jobs:
           rust-cache: false
 
       - id: install-nss
-        uses: ./install-nss
+        uses: $/install-nss
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -57,7 +57,7 @@ jobs:
           path: baseline
 
       - id: nss-meta-baseline
-        uses: ./.github/actions/nss-metadata
+        uses: $/.github/actions/nss-metadata
         continue-on-error: true # the baseline tag may predate [package.metadata.nss]
         with:
           working-directory: baseline

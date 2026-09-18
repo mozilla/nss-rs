@@ -28,7 +28,7 @@ runs:
         token: ${{ inputs.github-token }}
         rust-cache: false
 
-    - uses: ./install-nss
+    - uses: $/install-nss
       with:
         target: ${{ inputs.target }}
         token: ${{ inputs.github-token }}
