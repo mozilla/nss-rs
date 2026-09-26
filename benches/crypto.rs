@@ -8,11 +8,13 @@
 
 #![expect(clippy::unwrap_used, reason = "This is benchmark code.")]
 #![expect(
-    clippy::wildcard_imports,
-    reason = "Benchmark groups share the parent scope."
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
 )]
 
-use divan::{Bencher, black_box};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use nss_rs::{
     Mode, RecordProtection, RecordProtectionOps as _, SymKey,
     constants::{
@@ -28,22 +30,12 @@ use nss_rs::{
 };
 use test_fixture::fixture_init;
 
-fn main() {
-    fixture_init();
-    divan::main();
-}
-
-/// Cipher suite names, used as benchmark arguments so that reports are readable.
-const CIPHERS: [&str; 3] = ["aes128gcm", "aes256gcm", "chacha20poly1305"];
-
-fn cipher(name: &str) -> Cipher {
-    match name {
-        "aes128gcm" => TLS_AES_128_GCM_SHA256,
-        "aes256gcm" => TLS_AES_256_GCM_SHA384,
-        "chacha20poly1305" => TLS_CHACHA20_POLY1305_SHA256,
-        _ => unreachable!("unknown cipher {name}"),
-    }
-}
+/// Cipher suites, with names used in benchmark IDs so that reports are readable.
+const CIPHERS: [(&str, Cipher); 3] = [
+    ("aes128gcm", TLS_AES_128_GCM_SHA256),
+    ("aes256gcm", TLS_AES_256_GCM_SHA384),
+    ("chacha20poly1305", TLS_CHACHA20_POLY1305_SHA256),
+];
 
 /// Payload sizes: a small QUIC packet, a typical MTU-sized packet and a
 /// maximum-size TLS record.
@@ -71,193 +63,193 @@ fn payload(len: usize) -> Vec<u8> {
     (0..len).map(|i| u8::try_from(i % 251).unwrap()).collect()
 }
 
-mod aead {
-    use super::*;
-
-    #[divan::bench(args = CIPHERS)]
-    fn new(name: &str) -> RecordProtection {
-        let secret = secret();
-        RecordProtection::new(
-            TLS_VERSION_1_3,
-            cipher(black_box(name)),
-            &secret,
-            "quic ",
-            Mode::Encrypt,
-        )
-        .unwrap()
-    }
-
-    #[divan::bench(args = CIPHERS, consts = SIZES)]
-    fn encrypt<const N: usize>(bencher: Bencher, name: &str) {
-        let enc = record_protection(cipher(name), Mode::Encrypt);
-        let pt = payload(N);
-        let mut out = vec![0; N + enc.expansion()];
-        bencher.bench_local(|| {
-            let ct = enc
-                .encrypt(black_box(1), black_box(AAD), black_box(&pt), &mut out)
-                .unwrap();
-            black_box(ct.len());
+fn aead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("aead");
+    for (name, cipher) in CIPHERS {
+        group.bench_function(BenchmarkId::new("new", name), |b| {
+            let secret = secret();
+            b.iter(|| {
+                RecordProtection::new(
+                    TLS_VERSION_1_3,
+                    black_box(cipher),
+                    &secret,
+                    "quic ",
+                    Mode::Encrypt,
+                )
+                .unwrap()
+            });
         });
-    }
 
-    #[divan::bench(args = CIPHERS, consts = SIZES)]
-    fn decrypt<const N: usize>(bencher: Bencher, name: &str) {
-        let enc = record_protection(cipher(name), Mode::Encrypt);
-        let dec = record_protection(cipher(name), Mode::Decrypt);
-        let pt = payload(N);
-        let mut ct = vec![0; N + enc.expansion()];
-        let ct_len = enc.encrypt(1, AAD, &pt, &mut ct).unwrap().len();
-        ct.truncate(ct_len);
-        let mut out = vec![0; ct_len];
-        bencher.bench_local(|| {
-            let pt = dec
-                .decrypt(black_box(1), black_box(AAD), black_box(&ct), &mut out)
-                .unwrap();
-            black_box(pt.len());
-        });
+        for size in SIZES {
+            let enc = record_protection(cipher, Mode::Encrypt);
+            let pt = payload(size);
+            group.bench_function(BenchmarkId::new(format!("encrypt/{name}"), size), |b| {
+                let mut out = vec![0; size + enc.expansion()];
+                b.iter(|| {
+                    let ct = enc
+                        .encrypt(black_box(1), black_box(AAD), black_box(&pt), &mut out)
+                        .unwrap();
+                    black_box(ct.len());
+                });
+            });
+
+            let dec = record_protection(cipher, Mode::Decrypt);
+            let mut ct = vec![0; size + enc.expansion()];
+            let ct_len = enc.encrypt(1, AAD, &pt, &mut ct).unwrap().len();
+            ct.truncate(ct_len);
+            group.bench_function(BenchmarkId::new(format!("decrypt/{name}"), size), |b| {
+                let mut out = vec![0; ct_len];
+                b.iter(|| {
+                    let pt = dec
+                        .decrypt(black_box(1), black_box(AAD), black_box(&ct), &mut out)
+                        .unwrap();
+                    black_box(pt.len());
+                });
+            });
+        }
     }
+    group.finish();
 }
 
-mod header_protection {
-    use super::*;
+fn make_hp(cipher: Cipher) -> hp::Key {
+    let ikm = hkdf::import_key(TLS_VERSION_1_3, &[0; 16]).unwrap();
+    let prk = hkdf::extract(TLS_VERSION_1_3, cipher, None, &ikm).unwrap();
+    hp::Key::extract(TLS_VERSION_1_3, cipher, &prk, "hp").unwrap()
+}
 
-    fn make_hp(cipher: Cipher) -> hp::Key {
-        let ikm = hkdf::import_key(TLS_VERSION_1_3, &[0; 16]).unwrap();
-        let prk = hkdf::extract(TLS_VERSION_1_3, cipher, None, &ikm).unwrap();
-        hp::Key::extract(TLS_VERSION_1_3, cipher, &prk, "hp").unwrap()
-    }
+fn header_protection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("header_protection");
+    for (name, cipher) in CIPHERS {
+        group.bench_function(BenchmarkId::new("extract", name), |b| {
+            b.iter(|| make_hp(black_box(cipher)));
+        });
 
-    #[divan::bench(args = CIPHERS)]
-    fn extract(name: &str) -> hp::Key {
-        make_hp(cipher(black_box(name)))
-    }
-
-    #[divan::bench(args = CIPHERS)]
-    fn mask(bencher: Bencher, name: &str) {
-        let key = make_hp(cipher(name));
+        let key = make_hp(cipher);
         let sample = [0x5a; hp::Key::SAMPLE_SIZE];
-        bencher.bench_local(|| key.mask(black_box(&sample)).unwrap());
+        group.bench_function(BenchmarkId::new("mask", name), |b| {
+            b.iter(|| key.mask(black_box(&sample)).unwrap());
+        });
     }
+    group.finish();
 }
 
-mod key_schedule {
-    use super::*;
-
-    #[divan::bench(args = CIPHERS)]
-    fn extract(bencher: Bencher, name: &str) {
-        let cipher = cipher(name);
+fn key_schedule(c: &mut Criterion) {
+    let mut group = c.benchmark_group("key_schedule");
+    for (name, cipher) in CIPHERS {
         let ikm = secret();
         let salt = secret();
-        bencher.bench_local(|| {
-            hkdf::extract(TLS_VERSION_1_3, black_box(cipher), Some(&salt), &ikm).unwrap()
+        group.bench_function(BenchmarkId::new("extract", name), |b| {
+            b.iter(|| {
+                hkdf::extract(TLS_VERSION_1_3, black_box(cipher), Some(&salt), &ikm).unwrap()
+            });
         });
-    }
 
-    #[divan::bench(args = CIPHERS)]
-    fn expand_label(bencher: Bencher, name: &str) {
-        let cipher = cipher(name);
         let prk = hkdf::extract(TLS_VERSION_1_3, cipher, None, &secret()).unwrap();
-        bencher.bench_local(|| {
-            hkdf::expand_label(
-                TLS_VERSION_1_3,
-                black_box(cipher),
-                &prk,
-                &[],
-                "tls13 c hs traffic",
-            )
-            .unwrap()
+        group.bench_function(BenchmarkId::new("expand_label", name), |b| {
+            b.iter(|| {
+                hkdf::expand_label(
+                    TLS_VERSION_1_3,
+                    black_box(cipher),
+                    &prk,
+                    &[],
+                    "tls13 c hs traffic",
+                )
+                .unwrap()
+            });
         });
     }
+    group.finish();
 }
 
-mod digest {
-    use super::*;
-
-    const HASHES: [HashAlgorithm; 3] = [
-        HashAlgorithm::SHA2_256,
-        HashAlgorithm::SHA2_384,
-        HashAlgorithm::SHA2_512,
+fn digest(c: &mut Criterion) {
+    const HASHES: [(&str, HashAlgorithm); 3] = [
+        ("sha256", HashAlgorithm::SHA2_256),
+        ("sha384", HashAlgorithm::SHA2_384),
+        ("sha512", HashAlgorithm::SHA2_512),
     ];
 
-    #[divan::bench(args = HASHES, consts = SIZES)]
-    fn sha2<const N: usize>(bencher: Bencher, alg: &HashAlgorithm) {
-        let data = payload(N);
-        bencher.bench_local(|| hash(black_box(alg), black_box(&data)).unwrap());
-    }
+    let mut group = c.benchmark_group("digest");
+    for size in SIZES {
+        let data = payload(size);
+        for (name, alg) in &HASHES {
+            group.bench_function(BenchmarkId::new(*name, size), |b| {
+                b.iter(|| hash(black_box(alg), black_box(&data)).unwrap());
+            });
+        }
 
-    #[divan::bench(consts = SIZES)]
-    fn hmac_sha256<const N: usize>(bencher: Bencher) {
         let alg = HmacAlgorithm::HMAC_SHA2_256;
         let key = alg.import_key(SECRET).unwrap();
-        let data = payload(N);
-        bencher.bench_local(|| alg.hmac(&key, black_box(&data)).unwrap());
+        group.bench_function(BenchmarkId::new("hmac_sha256", size), |b| {
+            b.iter(|| alg.hmac(&key, black_box(&data)).unwrap());
+        });
     }
+    group.finish();
 }
 
-mod self_encrypt {
-    use super::*;
-
+fn self_encrypt(c: &mut Criterion) {
     const PLAINTEXT: &[u8] = b"a resumption token or other opaque server state";
 
-    #[divan::bench]
-    fn seal(bencher: Bencher) {
-        let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();
-        bencher.bench_local(|| se.seal(black_box(AAD), black_box(PLAINTEXT)).unwrap());
-    }
+    let mut group = c.benchmark_group("self_encrypt");
+    let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();
+    group.bench_function("seal", |b| {
+        b.iter(|| se.seal(black_box(AAD), black_box(PLAINTEXT)).unwrap());
+    });
 
-    #[divan::bench]
-    fn open(bencher: Bencher) {
-        let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();
-        let sealed = se.seal(AAD, PLAINTEXT).unwrap();
-        bencher.bench_local(|| se.open(black_box(AAD), black_box(&sealed)).unwrap());
-    }
+    let sealed = se.seal(AAD, PLAINTEXT).unwrap();
+    group.bench_function("open", |b| {
+        b.iter(|| se.open(black_box(AAD), black_box(&sealed)).unwrap());
+    });
+    group.finish();
 }
 
-mod ec {
-    use super::*;
-
-    const ECDH_CURVES: [EcCurve; 3] = [EcCurve::X25519, EcCurve::P256, EcCurve::P384];
+fn ec(c: &mut Criterion) {
+    const ECDH_CURVES: [(&str, EcCurve); 3] = [
+        ("x25519", EcCurve::X25519),
+        ("p256", EcCurve::P256),
+        ("p384", EcCurve::P384),
+    ];
     const MESSAGE: &[u8] = b"The quick brown fox jumps over the lazy dog";
 
-    #[divan::bench(args = ECDH_CURVES)]
-    fn keygen(curve: &EcCurve) {
-        black_box(ecdh_keygen(black_box(curve)).unwrap());
-    }
+    let mut group = c.benchmark_group("ec");
+    for (name, curve) in &ECDH_CURVES {
+        group.bench_function(BenchmarkId::new("keygen", name), |b| {
+            b.iter(|| ecdh_keygen(black_box(curve)).unwrap());
+        });
 
-    #[divan::bench(args = ECDH_CURVES)]
-    fn ecdh_agree(bencher: Bencher, curve: &EcCurve) {
         let a = ecdh_keygen(curve).unwrap();
-        let b = ecdh_keygen(curve).unwrap();
-        bencher.bench_local(|| ecdh(&a.private, black_box(&b.public)).unwrap());
+        let peer = ecdh_keygen(curve).unwrap();
+        group.bench_function(BenchmarkId::new("ecdh", name), |b| {
+            b.iter(|| ecdh(&a.private, black_box(&peer.public)).unwrap());
+        });
     }
 
-    #[divan::bench]
-    fn sign_p256(bencher: Bencher) {
-        let kp = ecdh_keygen(&EcCurve::P256).unwrap();
-        bencher.bench_local(|| sign_ecdsa(&kp.private, black_box(MESSAGE)).unwrap());
-    }
-
-    #[divan::bench]
-    fn verify_p256(bencher: Bencher) {
-        let kp = ecdh_keygen(&EcCurve::P256).unwrap();
-        let sig = sign_ecdsa(&kp.private, MESSAGE).unwrap();
-        bencher.bench_local(|| {
+    let kp = ecdh_keygen(&EcCurve::P256).unwrap();
+    let sig = sign_ecdsa(&kp.private, MESSAGE).unwrap();
+    group.bench_function("sign_p256", |b| {
+        b.iter(|| sign_ecdsa(&kp.private, black_box(MESSAGE)).unwrap());
+    });
+    group.bench_function("verify_p256", |b| {
+        b.iter(|| {
             assert!(verify_ecdsa(&kp.public, black_box(MESSAGE), black_box(&sig)).unwrap());
         });
-    }
+    });
 
-    #[divan::bench]
-    fn sign_ed25519(bencher: Bencher) {
-        let kp = ecdh_keygen(&EcCurve::Ed25519).unwrap();
-        bencher.bench_local(|| sign_eddsa(&kp.private, black_box(MESSAGE)).unwrap());
-    }
-
-    #[divan::bench]
-    fn verify_ed25519(bencher: Bencher) {
-        let kp = ecdh_keygen(&EcCurve::Ed25519).unwrap();
-        let sig = sign_eddsa(&kp.private, MESSAGE).unwrap();
-        bencher.bench_local(|| {
+    let kp = ecdh_keygen(&EcCurve::Ed25519).unwrap();
+    let sig = sign_eddsa(&kp.private, MESSAGE).unwrap();
+    group.bench_function("sign_ed25519", |b| {
+        b.iter(|| sign_eddsa(&kp.private, black_box(MESSAGE)).unwrap());
+    });
+    group.bench_function("verify_ed25519", |b| {
+        b.iter(|| {
             assert!(verify_eddsa(&kp.public, black_box(MESSAGE), black_box(&sig)).unwrap());
         });
-    }
+    });
+    group.finish();
 }
+
+criterion_group! {
+    name = benches;
+    config = { fixture_init(); Criterion::default() };
+    targets = aead, header_protection, key_schedule, digest, self_encrypt, ec
+}
+criterion_main!(benches);

@@ -7,29 +7,25 @@
 //! Benchmarks for complete TLS 1.3 handshakes between an in-memory client and server.
 
 #![expect(clippy::unwrap_used, reason = "This is benchmark code.")]
+#![expect(
+    clippy::significant_drop_tightening,
+    reason = "Inherent in codspeed criterion_group! macro."
+)]
 
-use divan::{Bencher, black_box};
+use std::hint::black_box;
+
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use nss_rs::{
     AuthenticationStatus, Client, Server, TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256,
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, constants::Group,
 };
 use test_fixture::{fixture_init, now};
 
-fn main() {
-    fixture_init();
-    divan::main();
-}
-
-/// Key exchange group names, used as benchmark arguments so that reports are readable.
-const GROUPS: [&str; 2] = ["x25519", "secp256r1"];
-
-fn group(name: &str) -> Group {
-    match name {
-        "x25519" => TLS_GRP_EC_X25519,
-        "secp256r1" => TLS_GRP_EC_SECP256R1,
-        _ => unreachable!("unknown group {name}"),
-    }
-}
+/// Key exchange groups, with names used in benchmark IDs so that reports are readable.
+const GROUPS: [(&str, Group); 2] = [
+    ("x25519", TLS_GRP_EC_X25519),
+    ("secp256r1", TLS_GRP_EC_SECP256R1),
+];
 
 fn setup(group: Group) -> (Client, Server) {
     let mut client = Client::new("server.example", true).unwrap();
@@ -54,50 +50,55 @@ fn handshake(client: &mut Client, server: &mut Server) -> usize {
     ch.len() + sh.len() + fin.len() + done.len()
 }
 
-/// Full handshake, including creation of the client and server agents.
-#[divan::bench(args = GROUPS)]
-fn full(bencher: Bencher, name: &str) {
-    let group = group(name);
-    bencher.bench_local(|| {
-        let (mut client, mut server) = setup(black_box(group));
-        handshake(&mut client, &mut server)
+fn handshakes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("handshake");
+    for (name, grp) in GROUPS {
+        // Full handshake, including creation of the client and server agents.
+        group.bench_function(BenchmarkId::new("full", name), |b| {
+            b.iter(|| {
+                let (mut client, mut server) = setup(black_box(grp));
+                handshake(&mut client, &mut server)
+            });
+        });
+
+        // Handshake only, with agent creation excluded from the measurement.
+        group.bench_function(BenchmarkId::new("handshake_only", name), |b| {
+            b.iter_batched_ref(
+                || setup(grp),
+                |(client, server)| handshake(client, server),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    // Client and server agent creation.
+    group.bench_function("agent_setup", |b| {
+        b.iter(|| setup(black_box(TLS_GRP_EC_X25519)));
     });
-}
 
-/// Handshake only, with agent creation excluded from the measurement.
-#[divan::bench(args = GROUPS)]
-fn handshake_only(bencher: Bencher, name: &str) {
-    let group = group(name);
-    bencher
-        .with_inputs(|| setup(group))
-        .bench_local_values(|(mut client, mut server)| {
-            handshake(&mut client, &mut server);
-            (client, server)
+    // Handshake with a restricted cipher suite.
+    for (name, suite) in [
+        ("aes128gcm", TLS_AES_128_GCM_SHA256),
+        ("chacha20poly1305", TLS_CHACHA20_POLY1305_SHA256),
+    ] {
+        group.bench_function(BenchmarkId::new("cipher_suite", name), |b| {
+            b.iter_batched_ref(
+                || {
+                    let (mut client, server) = setup(TLS_GRP_EC_X25519);
+                    client.set_ciphers(&[suite]).unwrap();
+                    (client, server)
+                },
+                |(client, server)| handshake(client, server),
+                BatchSize::SmallInput,
+            );
         });
+    }
+    group.finish();
 }
 
-/// Client and server agent creation.
-#[divan::bench]
-fn agent_setup() -> (Client, Server) {
-    setup(TLS_GRP_EC_X25519)
+criterion_group! {
+    name = benches;
+    config = { fixture_init(); Criterion::default() };
+    targets = handshakes
 }
-
-/// Handshake with a restricted cipher suite.
-#[divan::bench(args = ["aes128gcm", "chacha20poly1305"])]
-fn cipher_suite(bencher: Bencher, name: &str) {
-    let suite = match name {
-        "aes128gcm" => TLS_AES_128_GCM_SHA256,
-        "chacha20poly1305" => TLS_CHACHA20_POLY1305_SHA256,
-        _ => unreachable!("unknown cipher {name}"),
-    };
-    bencher
-        .with_inputs(|| {
-            let (mut client, server) = setup(TLS_GRP_EC_X25519);
-            client.set_ciphers(&[suite]).unwrap();
-            (client, server)
-        })
-        .bench_local_values(|(mut client, mut server)| {
-            handshake(&mut client, &mut server);
-            (client, server)
-        });
-}
+criterion_main!(benches);

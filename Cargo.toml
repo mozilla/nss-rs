@@ -162,7 +162,7 @@ features = [
 ]
 
 [dev-dependencies]
-divan = { package = "codspeed-divan-compat", version = "5.0.2" }
+criterion = { package = "codspeed-criterion-compat", version = "5", default-features = false }
 test-fixture = { path = "test-fixture" }
 
 [build-dependencies]
