@@ -1,0 +1,67 @@
+name: CodSpeed
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  merge_group:
+  workflow_dispatch: # For CodSpeed backfills.
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmarks:
+    name: Run benchmarks (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            args: --features bench
+          # blapi only changes record protection, so only that target is rerun.
+          - name: blapi
+            args: --features bench,blapi --bench record_protection
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # For CodSpeed OIDC authentication.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+        with:
+          version: stable
+          tools: cargo-codspeed
+          token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
+
+      - uses: $/install-nss
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the benchmark targets
+        env:
+          ARGS: ${{ matrix.args }}
+        run: |
+          # shellcheck disable=SC2086
+          cargo codspeed build --locked $ARGS
+
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: simulation
+          run: cargo codspeed run
