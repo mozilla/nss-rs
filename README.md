@@ -14,7 +14,7 @@ When cross-compiling, `pkg-config` is only consulted if `PKG_CONFIG_ALLOW_CROSS`
 
 ## Benchmarks
 
-Benchmarks live in `benches/` and use [Criterion.rs](https://github.com/bheisler/criterion.rs) through the [CodSpeed](https://codspeed.io) compatibility layer. Run them locally with `cargo bench --features bench`. They are also run in CI with CodSpeed to track performance changes.
+Run `cargo bench --features bench`. CI tracks the [Criterion.rs](https://github.com/bheisler/criterion.rs) benchmarks in `benches/` with [CodSpeed](https://codspeed.io).
 
 ## GitHub Actions
 

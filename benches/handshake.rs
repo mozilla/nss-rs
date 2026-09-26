@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Benchmarks for complete TLS 1.3 handshakes between an in-memory client and server.
+//! In-memory TLS 1.3 handshake benchmarks.
 
 #![expect(clippy::unwrap_used, reason = "This is benchmark code.")]
 #![expect(
@@ -21,13 +21,9 @@ use nss_rs::{
 };
 use test_fixture::{fixture_init, now};
 
-/// Key exchange groups, with names used in benchmark IDs so that reports are readable.
-const GROUPS: [(&str, Group); 2] = [
-    ("x25519", TLS_GRP_EC_X25519),
-    ("secp256r1", TLS_GRP_EC_SECP256R1),
-];
+type Agents = (Client, Server);
 
-fn setup(group: Group) -> (Client, Server) {
+fn agents(group: Group) -> Agents {
     let mut client = Client::new("server.example", true).unwrap();
     client.set_groups(&[group]).unwrap();
     let mut server = Server::new(&["key"]).unwrap();
@@ -35,62 +31,47 @@ fn setup(group: Group) -> (Client, Server) {
     (client, server)
 }
 
-/// Drive a full 1-RTT handshake to completion, returning the number of bytes exchanged.
-fn handshake(client: &mut Client, server: &mut Server) -> usize {
+/// Runs a 1-RTT handshake to completion.
+fn handshake((client, server): &mut Agents) {
     let now = now();
     let ch = client.handshake(now, &[]).unwrap();
     let sh = server.handshake(now, &ch).unwrap();
-    let empty = client.handshake(now, &sh).unwrap();
-    debug_assert!(empty.is_empty());
+    client.handshake(now, &sh).unwrap();
     client.authenticated(AuthenticationStatus::Ok);
     let fin = client.handshake(now, &[]).unwrap();
-    let done = server.handshake(now, &fin).unwrap();
-    debug_assert!(client.state().is_connected());
-    debug_assert!(server.state().is_connected());
-    ch.len() + sh.len() + fin.len() + done.len()
+    server.handshake(now, &fin).unwrap();
+    assert!(client.state().is_connected() && server.state().is_connected());
 }
 
 fn handshakes(c: &mut Criterion) {
     let mut group = c.benchmark_group("handshake");
-    for (name, grp) in GROUPS {
-        // Full handshake, including creation of the client and server agents.
+    for (name, grp) in [
+        ("x25519", TLS_GRP_EC_X25519),
+        ("secp256r1", TLS_GRP_EC_SECP256R1),
+    ] {
         group.bench_function(BenchmarkId::new("full", name), |b| {
-            b.iter(|| {
-                let (mut client, mut server) = setup(black_box(grp));
-                handshake(&mut client, &mut server)
-            });
+            b.iter(|| handshake(&mut agents(black_box(grp))));
         });
-
-        // Handshake only, with agent creation excluded from the measurement.
         group.bench_function(BenchmarkId::new("handshake_only", name), |b| {
-            b.iter_batched_ref(
-                || setup(grp),
-                |(client, server)| handshake(client, server),
-                BatchSize::SmallInput,
-            );
+            b.iter_batched_ref(|| agents(grp), handshake, BatchSize::SmallInput);
         });
     }
 
-    // Client and server agent creation.
     group.bench_function("agent_setup", |b| {
-        b.iter(|| setup(black_box(TLS_GRP_EC_X25519)));
+        b.iter(|| agents(black_box(TLS_GRP_EC_X25519)));
     });
 
-    // Handshake with a restricted cipher suite.
     for (name, suite) in [
         ("aes128gcm", TLS_AES_128_GCM_SHA256),
         ("chacha20poly1305", TLS_CHACHA20_POLY1305_SHA256),
     ] {
+        let setup = || {
+            let mut agents = agents(TLS_GRP_EC_X25519);
+            agents.0.set_ciphers(&[suite]).unwrap();
+            agents
+        };
         group.bench_function(BenchmarkId::new("cipher_suite", name), |b| {
-            b.iter_batched_ref(
-                || {
-                    let (mut client, server) = setup(TLS_GRP_EC_X25519);
-                    client.set_ciphers(&[suite]).unwrap();
-                    (client, server)
-                },
-                |(client, server)| handshake(client, server),
-                BatchSize::SmallInput,
-            );
+            b.iter_batched_ref(setup, handshake, BatchSize::SmallInput);
         });
     }
     group.finish();
