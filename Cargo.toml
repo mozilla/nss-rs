@@ -143,6 +143,10 @@ name = "crypto"
 harness = false
 name = "handshake"
 
+[[bench]]
+harness = false
+name = "record_protection"
+
 [dependencies]
 enum-map = { version = "2.7", default-features = false }
 log = { workspace = true }

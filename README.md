@@ -14,7 +14,7 @@ When cross-compiling, `pkg-config` is only consulted if `PKG_CONFIG_ALLOW_CROSS`
 
 ## Benchmarks
 
-Run `cargo bench --features bench`. CI tracks the [Criterion.rs](https://github.com/bheisler/criterion.rs) benchmarks in `benches/` with [CodSpeed](https://codspeed.io).
+Run `cargo bench --features bench`, and `cargo bench --features bench,blapi --bench record_protection` for the freebl backend. CI tracks the [Criterion.rs](https://github.com/bheisler/criterion.rs) benchmarks in `benches/` with [CodSpeed](https://codspeed.io).
 
 ## GitHub Actions
 

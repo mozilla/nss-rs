@@ -22,8 +22,17 @@ defaults:
 
 jobs:
   benchmarks:
-    name: Run benchmarks
+    name: Run benchmarks (${{ matrix.name }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            args: --features bench
+          # blapi only changes record protection, so only that target is rerun.
+          - name: blapi
+            args: --features bench,blapi --bench record_protection
     timeout-minutes: 30
     permissions:
       contents: read
@@ -45,7 +54,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build the benchmark targets
-        run: cargo codspeed build --locked --features bench
+        env:
+          ARGS: ${{ matrix.args }}
+        run: |
+          # shellcheck disable=SC2086
+          cargo codspeed build --locked $ARGS
 
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
