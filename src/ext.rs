@@ -129,7 +129,12 @@ impl ExtensionTracker {
         unsafe {
             Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
                 ExtensionWriterResult::Write(sz) => {
-                    *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
+                    let sz = c_uint::try_from(sz).expect("integer overflow from extension writer");
+                    // NSS reads `*len` bytes from the `max_len` buffer, so a
+                    // handler reporting more than it was given would have NSS
+                    // read past the buffer and emit that memory on the wire.
+                    assert!(sz <= max_len, "extension writer wrote past the buffer");
+                    *len = sz;
                     1
                 }
                 ExtensionWriterResult::Skip => 0,
