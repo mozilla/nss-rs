@@ -15,15 +15,13 @@ pub struct RecordProtection {}
 
 impl RecordProtection {
     fn decrypt_check(_count: u64, _aad: &[u8], input: &[u8]) -> Res<usize> {
-        let (len_encrypted, tag) = split_tag(input)?;
+        let (ct, tag) = split_tag(input)?;
         // Check that:
         // 1) expansion is all zeros and
         // 2) if the encrypted data is also supplied that at least some values are no zero
         //    (otherwise padding will be interpreted as a valid packet)
-        if tag.as_slice() == AEAD_NULL_TAG
-            && (len_encrypted == 0 || input[..len_encrypted].iter().any(|x| *x != 0x0))
-        {
-            Ok(len_encrypted)
+        if tag.as_slice() == AEAD_NULL_TAG && (ct.is_empty() || ct.iter().any(|x| *x != 0x0)) {
+            Ok(ct.len())
         } else {
             Err(Error::from(SEC_ERROR_BAD_DATA))
         }
