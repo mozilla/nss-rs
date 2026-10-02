@@ -21,7 +21,7 @@ use crate::{
     SECStatus,
     agentio::as_c_void,
     constants::{Extension, HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
-    err::Res,
+    err::{Error, Res},
     nss_prelude::PRBool,
     null_safe_slice,
     prio::PRFileDesc,
@@ -47,8 +47,56 @@ experimental_api! {
 }
 
 pub enum ExtensionWriterResult {
-    Write(usize),
+    Write,
     Skip,
+}
+
+/// The buffer that NSS provides for writing an extension.
+///
+/// This owns the write cursor, so the number of bytes NSS is told about is
+/// always the number of bytes that were actually written.
+pub struct ExtensionWriter<'a> {
+    buf: &'a mut [u8],
+    written: usize,
+}
+
+impl<'a> ExtensionWriter<'a> {
+    const fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, written: 0 }
+    }
+
+    /// How much space is left.
+    #[must_use]
+    pub const fn remaining(&self) -> usize {
+        self.buf.len() - self.written
+    }
+
+    /// Append `data` to the extension.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when `data` is larger than [`Self::remaining`],
+    /// in which case nothing is written and the cursor does not move.
+    pub fn write(&mut self, data: &[u8]) -> Res<()> {
+        let end = self
+            .written
+            .checked_add(data.len())
+            .ok_or(Error::InvalidInput)?;
+        let dst = self
+            .buf
+            .get_mut(self.written..end)
+            .ok_or(Error::InvalidInput)?;
+        dst.copy_from_slice(data);
+        self.written = end;
+        Ok(())
+    }
+
+    /// The number of bytes written, for reporting back to NSS.
+    fn written(&self) -> c_uint {
+        // `write` bounds this by the length of the buffer, which NSS gave us
+        // as a `c_uint`.
+        c_uint::try_from(self.written).unwrap_or_else(|_| unreachable!("bounded by max_len"))
+    }
 }
 
 pub enum ExtensionHandlerResult {
@@ -57,7 +105,7 @@ pub enum ExtensionHandlerResult {
 }
 
 pub trait ExtensionHandler {
-    /// Write an extension to the given buffer.
+    /// Write an extension using the given writer.
     /// NSS will call back when it needs an extension.
     /// Supply the bytes of the extension (without a type and length);
     /// the default implementation writes a zero-length extension
@@ -72,10 +120,10 @@ pub trait ExtensionHandler {
         &mut self,
         msg: HandshakeMessage,
         _ch_outer: bool,
-        _d: &mut [u8],
+        _w: &mut ExtensionWriter<'_>,
     ) -> ExtensionWriterResult {
         match msg {
-            TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => ExtensionWriterResult::Write(0),
+            TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => ExtensionWriterResult::Write,
             _ => ExtensionWriterResult::Skip,
         }
     }
@@ -125,13 +173,12 @@ impl ExtensionTracker {
             |msg| (msg, false),
         );
         let d = unsafe { std::slice::from_raw_parts_mut(data, max_len as usize) };
+        let mut w = ExtensionWriter::new(d);
         // provided by NSS for writing the output length.
         unsafe {
-            Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
-                ExtensionWriterResult::Write(sz) => {
-                    let sz = c_uint::try_from(sz).expect("integer overflow from extension writer");
-                    assert!(sz <= max_len, "extension writer wrote past the buffer");
-                    *len = sz;
+            Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, &mut w) {
+                ExtensionWriterResult::Write => {
+                    *len = w.written();
                     1
                 }
                 ExtensionWriterResult::Skip => 0,
