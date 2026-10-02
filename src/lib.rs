@@ -68,7 +68,7 @@ pub use self::{
         generate_keys as generate_ech_keys,
     },
     err::{Error, IntoResult, PRErrorCode, Res, secstatus_to_res},
-    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter, ExtensionWriterResult},
     p11::{PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
     secrets::SecretDirection,
