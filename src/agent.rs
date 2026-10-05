@@ -128,8 +128,7 @@ fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
         ) => {
             let chosen_len = usize::try_from(chosen_len)?;
             let chosen = chosen.get(..chosen_len).ok_or(Error::Internal)?;
-            let chosen = str::from_utf8(chosen)?;
-            Some(chosen.to_owned())
+            Some(str::from_utf8(chosen)?.to_owned())
         }
         _ => None,
     };
