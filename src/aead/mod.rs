@@ -297,12 +297,9 @@ impl Aead {
         assert_eq!(self.mode, Mode::Encrypt);
         // A copy for the nonce generator to write into.  But we don't use the value.
         let mut nonce = self.nonce_base;
-        // Ciphertext with enough space for the tag.
-        // Even though we give the operation a separate buffer for the tag,
-        // reserve the capacity on allocation.
-        let mut ct = vec![0; pt.len() + TAG_LEN];
+        let mut ct = vec![0; pt.len() + TAG_LEN]; // Tag is written directly into the tail.
         let mut ct_len: c_int = 0;
-        let mut tag = vec![0; TAG_LEN];
+        let ct_ptr = ct.as_mut_ptr();
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
@@ -312,18 +309,19 @@ impl Aead {
                 c_int_len(nonce.len())?,
                 aad.as_ptr(),
                 c_int_len(aad.len())?,
-                ct.as_mut_ptr(),
+                ct_ptr,
                 &raw mut ct_len,
                 c_int_len(ct.len())?, // signed :(
-                tag.as_mut_ptr(),
-                c_int_len(tag.len())?,
+                ct_ptr.add(pt.len()),
+                c_int_len(TAG_LEN)?,
                 pt.as_ptr(),
                 c_int_len(pt.len())?,
             )
         })?;
-        ct.truncate(usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?);
-        debug_assert_eq!(ct.len(), pt.len());
-        ct.append(&mut tag);
+        let len = usize::try_from(ct_len)?;
+        if len != pt.len() {
+            return Err(Error::Internal);
+        }
         Ok(ct)
     }
 
@@ -342,9 +340,9 @@ impl Aead {
 
         assert_eq!(self.mode, Mode::Encrypt);
         let mut nonce = xor_nonce(&self.nonce_base, seq);
-        let mut ct = vec![0; pt.len() + TAG_LEN];
+        let mut ct = vec![0; pt.len() + TAG_LEN]; // Tag is written directly into the tail.
         let mut ct_len: c_int = 0;
-        let mut tag = vec![0; TAG_LEN];
+        let ct_ptr = ct.as_mut_ptr();
         secstatus_to_res(unsafe {
             PK11_AEADOp(
                 *self.ctx,
@@ -354,18 +352,19 @@ impl Aead {
                 c_int_len(nonce.len())?,
                 aad.as_ptr(),
                 c_int_len(aad.len())?,
-                ct.as_mut_ptr(),
+                ct_ptr,
                 &raw mut ct_len,
                 c_int_len(ct.len())?,
-                tag.as_mut_ptr(),
-                c_int_len(tag.len())?,
+                ct_ptr.add(pt.len()),
+                c_int_len(TAG_LEN)?,
                 pt.as_ptr(),
                 c_int_len(pt.len())?,
             )
         })?;
-        ct.truncate(usize::try_from(ct_len).map_err(|_| Error::IntegerOverflow)?);
-        debug_assert_eq!(ct.len(), pt.len());
-        ct.append(&mut tag);
+        let len = usize::try_from(ct_len)?;
+        if len != pt.len() {
+            return Err(Error::Internal);
+        }
         Ok(ct)
     }
 
@@ -430,9 +429,17 @@ mod test {
         let ciphertext = enc.encrypt(aad, pt).unwrap();
         assert_eq!(&ciphertext[..], ct);
 
+        // A fresh context's internal counter starts at zero, so this must match `encrypt`.
+        let mut enc_seq = Aead::new(Mode::Encrypt, algorithm, &k, *nonce).unwrap();
+        assert_eq!(enc_seq.encrypt_with_seq(aad, 0, pt).unwrap(), ciphertext);
+
         let mut dec = Aead::new(Mode::Decrypt, algorithm, &k, *nonce).unwrap();
         let plaintext = dec.decrypt(aad, 0, ct).unwrap();
         assert_eq!(&plaintext[..], pt);
+
+        let mut tampered = ct.to_vec();
+        *tampered.last_mut().unwrap() ^= 0xff;
+        assert!(dec.decrypt(aad, 0, &tampered).is_err());
     }
 
     fn decrypt(

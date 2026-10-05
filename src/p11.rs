@@ -83,14 +83,15 @@ impl PublicKey {
     /// [P384]: crate::ec::EcCurve::P384
     /// [P521]: crate::ec::EcCurve::P521
     /// [X25519]: crate::ec::EcCurve::X25519
-    pub fn key_data(&self) -> Res<Vec<u8>> {
+    pub fn key_data(&self) -> Res<&[u8]> {
         let ptr = unsafe { self.ptr.as_ref() }.ok_or(Error::InvalidInput)?;
 
         if ptr.keyType != KeyType_ecKey && ptr.keyType != KeyType_ecMontKey {
             return Err(Error::InvalidInput);
         }
 
-        Ok(unsafe { ptr.u.ec.as_ref().publicValue.as_slice() }.to_owned())
+        // This is data embedded in the key struct, so we can treat it as a borrow.
+        Ok(unsafe { ptr.u.ec.as_ref().publicValue.as_slice() })
     }
 
     /// Get the DER-encoded serialization of an EC point.

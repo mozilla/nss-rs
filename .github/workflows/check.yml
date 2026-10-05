@@ -25,27 +25,31 @@ defaults:
     shell: bash
 
 jobs:
-  toolchains:
-    name: Determine toolchains
+  metadata:
+    name: Read crate metadata
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
+      nss-min-version: ${{ steps.nss-meta.outputs.min-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
+        uses: mozilla/actions/toolchains@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+
+      - id: nss-meta
+        uses: $/.github/actions/nss-metadata
 
   check:
     name: Run checks
-    needs: toolchains
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
-        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(needs.metadata.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
@@ -77,7 +81,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
+      - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -85,7 +89,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
 
-      - uses: ./install-nss
+      - uses: $/install-nss
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -144,7 +148,7 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -170,7 +174,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
+      - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
         with:
           version: stable
           tools: cargo-hack
@@ -190,7 +194,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-android
+      - uses: $/.github/actions/check-android
         with:
           target: ${{ matrix.target }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -209,11 +213,10 @@ jobs:
   check-distro:
     name: Check with system NSS on ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    needs: metadata
     # Tests the pkg-config codepath against distro-packaged NSS. Some distros
     # omit -L for default library search paths (e.g., /usr/lib64 on Fedora/RHEL),
     # which the Ubuntu CI runners don't exercise.
-    # Allow failures in merge queue in case distro NSS lags our minimum version.
-    continue-on-error: ${{ github.event_name == 'merge_group' }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags || '' }}
     strategy:
@@ -226,11 +229,11 @@ jobs:
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
-            container: opensuse/tumbleweed:latest@sha256:8059a34839bdc8dccd685e93901e03ba31cc5905c0d55c23639c414b3d76c1ac
+            container: opensuse/tumbleweed:latest@sha256:e6241c6a2e2b3a1edcc44603ba5fc3a56c38ba6703e3cbdc69196cb8ecdd0153
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
-            container: archlinux:latest@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309
+            container: archlinux:latest@sha256:f3691b4dde62ba4c4b6f0ae2c1fbf28e8c0c8c4b9a35c7e06dc1f70e21aa29f6
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
           - name: Alpine
             # renovate: depName=alpine datasource=docker
@@ -241,14 +244,14 @@ jobs:
             rustflags: "-C target-feature=-crt-static"
           - name: Gentoo
             # renovate: depName=gentoo/stage3 datasource=docker
-            container: gentoo/stage3:latest@sha256:b27165201b3dbec4214b3cf771c1fde087e233acba78997ac5e45b0c74535200
+            container: gentoo/stage3:latest@sha256:e84e75b31ba98f26c9bc7acc4e4a9dd9846f289f12176703ff65d202af68179c
             install: >-
               emerge-webrsync -q &&
               emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
               ACCEPT_KEYWORDS="~amd64" emerge -q --getbinpkg --quiet-build=y -1 dev-libs/nss
           - name: Slackware
             # renovate: depName=aclemons/slackware datasource=docker
-            container: aclemons/slackware:current-full@sha256:e07a4d1c18b0c3d1dc07b7c622d65bd87245e5ab6c6805f20bc472873d57f1e5
+            container: aclemons/slackware:current-full@sha256:eae9ab4a4372052d96a4c6bbf18a2d7562e5290dfb0e457462d04efa29df22a2
             # current-full ships a complete Slackware installation including all deps
             install: ":"
     defaults:
@@ -274,7 +277,15 @@ jobs:
             echo "LIBCLANG_PATH=$(dirname "$CLANG_LIB")" >> "$GITHUB_ENV"
           fi
 
+      - name: Check system NSS version
+        id: nss
+        env:
+          NAME: ${{ matrix.name }}
+          NSS_MIN_VERSION: ${{ needs.metadata.outputs.nss-min-version }}
+        run: sh .github/scripts/nss-version-check.sh "$NSS_MIN_VERSION" "$NAME"
+
       - name: Install Rust
+        if: steps.nss.outputs.skip != 'true'
         run: |
           if command -v rustup > /dev/null 2>&1; then
             rustup toolchain install stable --profile minimal
@@ -286,33 +297,34 @@ jobs:
           [ -f "$HOME/.cargo/env" ] || touch "$HOME/.cargo/env"
 
       - name: Build
+        if: steps.nss.outputs.skip != 'true'
         run: |
           . "$HOME/.cargo/env"
           cargo build --locked --all-targets
 
       - name: Build feature powerset
+        if: steps.nss.outputs.skip != 'true'
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.23.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.1/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
-    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
-    # Allow them to fail without aborting the merge queue.
-    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
+    needs: metadata
     strategy:
       fail-fast: false
       matrix:
-        os: [freebsd, netbsd, openbsd] # NSS package on 'solaris' is too old.
+        os: [freebsd, netbsd, openbsd, solaris]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: $/.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
+          nss-min-version: ${{ needs.metadata.outputs.nss-min-version }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
