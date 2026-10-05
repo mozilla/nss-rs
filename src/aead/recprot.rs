@@ -11,7 +11,7 @@ use std::{
 
 use super::{
     AeadAlgorithms, COUNTER_LEN, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, c_int_len,
-    expand_label, expand_label_buf, split_tag, xor_nonce,
+    expand_label, expand_label_buf, split_tag, split_tag_mut, xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SECItemBorrowed, SymKey, Version,
@@ -208,21 +208,21 @@ impl RecordProtectionOps for RecordProtection {
                 count,
                 aad,
                 output.as_mut_ptr(),
-                output.len(),
+                ct.len(),
                 tag.as_mut_ptr(),
                 ct.as_ptr(),
                 ct.len(),
             )
         }?;
+        if out_len != ct.len() {
+            return Err(Error::Internal);
+        }
         Ok(&output[..out_len])
     }
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-        let ct_len = data
-            .len()
-            .checked_sub(TAG_LEN)
-            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
-        let (ct, tag) = data.split_at_mut(ct_len);
+        let (ct, tag) = split_tag_mut(data)?;
+        let ct_len = ct.len();
         let ct_ptr = ct.as_mut_ptr();
         let out_len = unsafe {
             aead_op(

@@ -19,7 +19,7 @@ use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use super::{
     AeadAlgorithms, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, expand_label_buf, split_tag,
-    xor_nonce,
+    split_tag_mut, xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SymKey, Version,
@@ -301,12 +301,9 @@ impl RecordProtectionOps for RecordProtection {
     }
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-        let ct_len = data
-            .len()
-            .checked_sub(TAG_LEN)
-            .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))?;
+        let (ct, tag) = split_tag_mut(data)?;
+        let ct_len = ct.len();
         let ct_len_c = c_uint::try_from(ct_len)?;
-        let (ct, tag) = data.split_at_mut(ct_len);
         let ct_ptr = ct.as_mut_ptr();
         let nonce = xor_nonce(&self.nonce_base, count);
         let out_len = unsafe {

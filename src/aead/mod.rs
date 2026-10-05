@@ -173,6 +173,13 @@ fn split_tag(data: &[u8]) -> Res<(&[u8], &[u8; TAG_LEN])> {
         .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))
 }
 
+/// Mutable counterpart of [`split_tag`], for in-place decryption.
+#[cfg(not(feature = "disable-encryption"))]
+fn split_tag_mut(data: &mut [u8]) -> Res<(&mut [u8], &mut [u8; TAG_LEN])> {
+    data.split_last_chunk_mut()
+        .ok_or_else(|| Error::from(SEC_ERROR_BAD_DATA))
+}
+
 pub type SequenceNumber = u64;
 
 /// All the lengths used by `PK11_AEADOp` are signed.  This converts to that.
