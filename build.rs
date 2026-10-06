@@ -15,6 +15,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::LazyLock,
 };
 
 use bindgen::{
@@ -26,15 +27,28 @@ use serde_derive::Deserialize;
 const BINDINGS_DIR: &str = "bindings";
 const BINDINGS_CONFIG: &str = "bindings.toml";
 
-// The minimum version of NSS that this version of nss-rs requires.
-fn min_nss_version() -> String {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let manifest = fs::read_to_string(Path::new(&manifest_dir).join("Cargo.toml")).unwrap();
-    let manifest: ::toml::Value = ::toml::from_str(&manifest).unwrap();
-    manifest["package"]["metadata"]["nss"]["min-version"]
-        .as_str()
-        .unwrap()
-        .to_owned()
+/// The `[package.metadata.nss]` section of `Cargo.toml`.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct NssMetadata {
+    /// The minimum version of NSS that this version of nss-rs requires.
+    min_version: String,
+    /// The NSS commit to build when pkg-config can't find NSS.
+    commit: String,
+    /// The NSPR commit to build with it.
+    nspr_commit: String,
+}
+
+impl NssMetadata {
+    fn read() -> Self {
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let manifest = fs::read_to_string(Path::new(&manifest_dir).join("Cargo.toml")).unwrap();
+        let manifest: ::toml::Value = ::toml::from_str(&manifest).unwrap();
+        manifest["package"]["metadata"]["nss"]
+            .clone()
+            .try_into()
+            .unwrap()
+    }
 }
 
 // This is the format of a single section of the configuration file.
@@ -160,97 +174,136 @@ fn setup_clang() {
     }
 }
 
-/// A `git` command that ignores `GIT_DIR`/`GIT_WORK_TREE`, and fails rather than prompting.
-fn git() -> Command {
+/// The repo-local `GIT_*` variables, which must not leak into git commands run in `OUT_DIR`.
+static GIT_LOCAL_VARS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    let out = Command::new("git")
+        .args(["rev-parse", "--local-env-vars"])
+        .output()
+        .unwrap_or_else(|e| panic!("can't run git: {e}"));
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_owned)
+        .collect()
+});
+
+/// A `git -C dest` command that ignores [`GIT_LOCAL_VARS`], and fails rather than prompting.
+fn git_in(dest: &Path) -> Command {
     let mut cmd = Command::new("git");
-    cmd.env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_TERMINAL_PROMPT", "0");
+    for var in GIT_LOCAL_VARS.iter() {
+        cmd.env_remove(var);
+    }
+    cmd.env("GIT_TERMINAL_PROMPT", "0").arg("-C").arg(dest);
     cmd
 }
 
-/// Run `git <args>` in `dest`, returning its stdout if it exits successfully.
-fn git_in(dest: &Path, args: &[&str]) -> Option<String> {
-    let out = git().arg("-C").arg(dest).args(args).output().ok()?;
+/// The commit hash of `HEAD` in the git checkout at `dest`.
+fn git_head(dest: &Path) -> Option<String> {
+    let out = git_in(dest).args(["rev-parse", "HEAD"]).output().ok()?;
     out.status
         .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
-/// Whether the git checkout at `dest` has tag `tag` pointing at its `HEAD`.
-fn git_at_tag(dest: &Path, tag: &str) -> bool {
-    git_in(dest, &["tag", "--points-at", "HEAD"]).is_some_and(|out| out.lines().any(|t| t == tag))
-}
-
-/// Clone `url` into `dest`, reusing an existing checkout only if already at `tag`.
-/// Returns whether it cloned.
-fn git_clone(url: &str, dest: &Path, tag: &str) -> bool {
+/// Fetch `commit` from `url` into `dest` unless already there; returns whether it fetched.
+fn git_fetch(url: &str, dest: &Path, commit: &str) -> bool {
     if dest.exists() {
-        if git_at_tag(dest, tag) {
+        if git_head(dest).as_deref() == Some(commit) {
             return false;
         }
         fs::remove_dir_all(dest)
             .unwrap_or_else(|e| panic!("can't remove stale {}: {e}", dest.display()));
     }
 
-    let status = git()
-        .args(["clone", "--depth=1", "--branch", tag])
-        .arg(url)
-        .arg(dest)
-        .status()
-        .unwrap_or_else(|e| panic!("can't run git: {e}"));
-    assert!(status.success(), "failed to clone {url} at {tag}");
+    fs::create_dir_all(dest).unwrap_or_else(|e| panic!("can't create {}: {e}", dest.display()));
+    for args in [
+        &["init", "-q"][..],
+        &["fetch", "-q", "--depth=1", url, commit],
+        &["checkout", "-q", "FETCH_HEAD"],
+    ] {
+        let status = git_in(dest)
+            .args(args)
+            .status()
+            .unwrap_or_else(|e| panic!("can't run git: {e}"));
+        assert!(status.success(), "failed to fetch {commit} from {url}");
+    }
     true
 }
 
-/// The release tag for `product` at `version`, e.g. `NSS_3_126_RTM`.
-fn rtm_tag(product: &str, version: &str) -> String {
-    format!("{product}_{}_RTM", version.replace('.', "_"))
+/// Parse a version like `3.126` or `4.38.2` into `[major, minor, patch]`.
+fn parse_version(version: &str) -> [u32; 3] {
+    let mut parts = [0; 3];
+    for (part, s) in parts.iter_mut().zip(version.trim().split('.')) {
+        *part = s
+            .parse()
+            .unwrap_or_else(|e| panic!("bad version {version}: {e}"));
+    }
+    parts
 }
 
-fn nss_dir(min_version: &str) -> String {
-    let dir = env::var("NSS_DIR").map_or_else(
-        |_| {
-            let out_dir = env::var("OUT_DIR").unwrap();
-            let nss_dir = Path::new(&out_dir).join("nss");
-            let tag = rtm_tag("NSS", min_version);
-            let nss_cloned = git_clone("https://github.com/mozilla/nss.git", &nss_dir, &tag);
+/// The version, e.g. `3.126`, in the `#define <name> "<version>"` line of `header`.
+fn header_version(header: &Path, name: &str) -> String {
+    let text = fs::read_to_string(header)
+        .unwrap_or_else(|e| panic!("can't read {}: {e}", header.display()));
+    text.lines()
+        .find_map(|line| {
+            let rest = line
+                .strip_prefix("#define")?
+                .trim_start()
+                .strip_prefix(name)?;
+            // Reject longer names that start with `name`, and drop a trailing ` Beta`.
+            rest.starts_with(char::is_whitespace)
+                .then(|| rest.split('"').nth(1)?.split_whitespace().next())
+                .flatten()
+        })
+        .unwrap_or_else(|| panic!("no {name} in {}", header.display()))
+        .to_owned()
+}
 
-            let nspr_version_file = nss_dir.join("automation/release/nspr-version.txt");
-            let nspr_version = fs::read_to_string(nspr_version_file)
-                .expect("can't read NSPR version required by this NSS release");
-            let nspr_version = nspr_version
-                .lines()
-                .next()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .expect("no NSPR version on the first line of nspr-version.txt");
-            let nspr_tag = rtm_tag("NSPR", nspr_version);
-            let nspr_dir = Path::new(&out_dir).join("nspr");
-            let nspr_cloned =
-                git_clone("https://github.com/mozilla/nspr.git", &nspr_dir, &nspr_tag);
+/// Fetch the pinned NSS and NSPR into `OUT_DIR`, returning the NSS directory.
+fn nss_dir(metadata: &NssMetadata) -> String {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let (nss_dir, nspr_dir) = (out_dir.join("nss"), out_dir.join("nspr"));
+    // Not `any()`, which would stop fetching at the first fetch.
+    let fetched = [("nss", &metadata.commit), ("nspr", &metadata.nspr_commit)]
+        .into_iter()
+        .map(|(repo, commit)| {
+            let url = format!("https://github.com/mozilla/{repo}.git");
+            git_fetch(&url, &out_dir.join(repo), commit)
+        })
+        .fold(false, |any, fetched| any | fetched);
 
-            // build.sh writes to ../dist and never cleans it, so a stale tag's artifacts persist.
-            let dist = Path::new(&out_dir).join("dist");
-            if (nss_cloned || nspr_cloned) && dist.exists() {
-                fs::remove_dir_all(&dist)
-                    .unwrap_or_else(|e| panic!("can't remove stale {}: {e}", dist.display()));
-            }
-            nss_dir
-        },
-        |dir| {
-            let path = PathBuf::from(dir.trim());
-            assert!(
-                !path.is_relative(),
-                "The NSS_DIR environment variable is expected to be an absolute path."
-            );
-            path
-        },
-    );
-    assert!(dir.is_dir(), "NSS_DIR {} doesn't exist", dir.display());
+    // The first line holds the minimum NSPR version this NSS supports.
+    let nspr_required = fs::read_to_string(nss_dir.join("automation/release/nspr-version.txt"))
+        .expect("can't read NSPR version required by the pinned NSS");
+    for (header, name, min_version) in [
+        (
+            nss_dir.join("lib/nss/nss.h"),
+            "NSS_VERSION",
+            metadata.min_version.as_str(),
+        ),
+        (
+            nspr_dir.join("pr/include/prinit.h"),
+            "PR_VERSION",
+            nspr_required.lines().next().unwrap_or_default(),
+        ),
+    ] {
+        let version = header_version(&header, name);
+        assert!(
+            parse_version(&version) >= parse_version(min_version),
+            "{} has version {version}, older than the required {min_version}",
+            header.display()
+        );
+    }
+
+    // build.sh writes to ../dist and never cleans it, so a stale pin's artifacts persist.
+    let dist = out_dir.join("dist");
+    if fetched && dist.exists() {
+        fs::remove_dir_all(&dist)
+            .unwrap_or_else(|e| panic!("can't remove stale {}: {e}", dist.display()));
+    }
     // Note that this returns a relative path because UNC
     // paths on windows cause certain tools to explode.
-    dir.to_string_lossy().to_string()
+    nss_dir.to_string_lossy().to_string()
 }
 
 fn get_bash() -> PathBuf {
@@ -734,8 +787,8 @@ fn main() {
 
     setup_clang();
 
-    let min_version = min_nss_version();
-    println!("cargo:rustc-env=NSS_MIN_VERSION={min_version}");
+    let metadata = NssMetadata::read();
+    println!("cargo:rustc-env=NSS_MIN_VERSION={}", metadata.min_version);
 
     for var in [
         "NSS_DIR",
@@ -754,7 +807,8 @@ fn main() {
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
         setup_standalone(nss_dir.trim().to_string())
     } else {
-        setup_pkg_config(&min_version).unwrap_or_else(|| setup_standalone(nss_dir(&min_version)))
+        setup_pkg_config(&metadata.min_version)
+            .unwrap_or_else(|| setup_standalone(nss_dir(&metadata)))
     };
 
     for (k, v) in &config {

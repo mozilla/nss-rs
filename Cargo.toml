@@ -24,8 +24,11 @@ exclude = [
 [package.metadata.nss]
 # Minimum NSS version required for nss-rs.
 min-version = "3.126"
+# NSS and NSPR commits to build when pkg-config can't find NSS.
+commit = "670f6a153802bd98e7797855e71b35854f63a232" # NSS_3_126_RTM
+nspr-commit = "0190cb6d941d9209b3d0be90b5fd40c9b6cfaaa5" # NSPR_4_39_RTM
 # SHA256 of the 'nss-<min-version>-with-nspr-<some-version>.tar.gz' release tarball.
-sha256 = "c95a4cf93d6939000642254422d71dffccb5c017d0f40733d3e2be18aa93f1be"
+sha256 = "c95a4cf93d6939000642254422d71dffccb5c017d0f40733d3e2be18aa93f1be" # nss-3.126-with-nspr-4.39.tar.gz
 
 [package.metadata.cargo-machete]
 ignored = ["bindgen", "pkg-config", "serde", "serde_derive", "toml"]
