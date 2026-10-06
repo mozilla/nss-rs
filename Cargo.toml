@@ -192,3 +192,11 @@ gecko = ["mozbuild"]
 
 [lints]
 workspace = true
+
+[profile.bench]
+# Inherits from the "release" profile, so just provide overrides here:
+# https://doc.rust-lang.org/cargo/reference/profiles.html#release
+debug = true
+
+[profile.release]
+lto = "fat"
