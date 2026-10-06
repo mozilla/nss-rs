@@ -135,6 +135,18 @@ unused_qualifications = "warn"
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
+[[bench]]
+harness = false
+name = "crypto"
+
+[[bench]]
+harness = false
+name = "handshake"
+
+[[bench]]
+harness = false
+name = "record_protection"
+
 [dependencies]
 enum-map = { version = "2.7", default-features = false }
 log = { workspace = true }
@@ -154,6 +166,7 @@ features = [
 ]
 
 [dev-dependencies]
+criterion = { package = "codspeed-criterion-compat", version = "5", default-features = false }
 test-fixture = { path = "test-fixture" }
 
 [build-dependencies]
