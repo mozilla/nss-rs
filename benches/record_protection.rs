@@ -18,7 +18,7 @@ mod common;
 use std::hint::black_box;
 
 use common::{CIPHERS, DATA, SIZES, secret};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use nss_rs::{
     Mode, RecordProtection, RecordProtectionOps as _,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -59,8 +59,65 @@ fn aead(c: &mut Criterion) {
             group.bench_function(BenchmarkId::new(format!("decrypt/{name}"), size), |b| {
                 b.iter(|| dec.decrypt(0, AAD, black_box(&ct), &mut out).unwrap().len());
             });
+
+            // The in-place variants are what QUIC packet protection uses.
+            let mut buf = vec![0x5a; size + enc.expansion()];
+            group.bench_function(
+                BenchmarkId::new(format!("encrypt_in_place/{name}"), size),
+                |b| {
+                    b.iter(|| enc.encrypt_in_place(0, AAD, black_box(&mut buf)).unwrap());
+                },
+            );
+            group.bench_function(
+                BenchmarkId::new(format!("decrypt_in_place/{name}"), size),
+                |b| {
+                    b.iter_batched_ref(
+                        || ct.clone(),
+                        |buf| dec.decrypt_in_place(0, AAD, black_box(buf)).unwrap(),
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
         }
     }
+    group.finish();
+}
+
+/// QUIC Retry integrity tag: AES-128-GCM over an empty plaintext.
+fn retry(c: &mut Criterion) {
+    let secret = secret();
+    let rp = |mode| {
+        RecordProtection::new(
+            TLS_VERSION_1_3,
+            TLS_AES_128_GCM_SHA256,
+            &secret,
+            "quic ",
+            mode,
+        )
+        .unwrap()
+    };
+    let (enc, dec) = (rp(Mode::Encrypt), rp(Mode::Decrypt));
+    // Retry pseudo-packet: ODCID, long header, CIDs and a token.
+    let aad = [0x5a; 96];
+    let mut tag = vec![0; enc.expansion()];
+    enc.encrypt(0, &aad, &[], &mut tag).unwrap();
+    let mut out = vec![0; enc.expansion()];
+
+    let mut group = c.benchmark_group(format!("retry/{BACKEND}"));
+    group.bench_function("tag", |b| {
+        b.iter(|| {
+            enc.encrypt(0, black_box(&aad), &[], &mut out)
+                .unwrap()
+                .len()
+        });
+    });
+    group.bench_function("verify", |b| {
+        b.iter(|| {
+            dec.decrypt(0, black_box(&aad), &tag, &mut out)
+                .unwrap()
+                .len()
+        });
+    });
     group.finish();
 }
 
@@ -97,6 +154,6 @@ fn self_encrypt(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = { fixture_init(); Criterion::default() };
-    targets = aead, header_protection, self_encrypt
+    targets = aead, header_protection, retry, self_encrypt
 }
 criterion_main!(benches);
