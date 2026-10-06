@@ -216,7 +216,7 @@ fn git_fetch(url: &str, dest: &Path, commit: &str) -> bool {
 
     fs::create_dir_all(dest).unwrap_or_else(|e| panic!("can't create {}: {e}", dest.display()));
     for args in [
-        &["init", "-q"][..],
+        &["init", "-q", "--object-format=sha1"][..],
         &["fetch", "-q", "--depth=1", url, commit],
         &["checkout", "-q", "FETCH_HEAD"],
     ] {
