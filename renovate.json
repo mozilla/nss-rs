@@ -20,7 +20,7 @@
       "matchStrings": [
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+container:\\s*\\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*cargo install \\S+?@(?<currentValue>[0-9][0-9.]*)",
-        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm-(?<currentValue>[0-9.]+(?:p[0-9]+)?)",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm%(?<currentValue>[0-9]+)",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+release: \"(?<currentValue>[0-9]+\\.[0-9]+)\""
       ]
@@ -31,7 +31,7 @@
       "matchDepNames": [
         "llvm"
       ],
-      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:p(?<build>\\d+))?$",
+      "versioning": "regex:^(?<major>\\d+)$",
       "postUpgradeTasks": {
         "commands": [
           "sed -i 's|/usr/local/llvm{{{currentMajor}}}/|/usr/local/llvm{{{newMajor}}}/|g' .github/actions/check-vm/action.yml"
@@ -80,7 +80,7 @@
     "openbsd-packages": {
       "format": "html",
       "transformTemplates": [
-        "{\"releases\": releases[$match(version, /^llvm-\\d+\\.\\d+\\.\\d+(p\\d+)?\\.tgz$/)].{\"version\": $replace($replace(version, /^llvm-/, \"\"), /\\.tgz$/, \"\")}}"
+        "{\"releases\": [$distinct(releases[$match(version, /^llvm-\\d+\\.\\d+\\.\\d+(p\\d+)?\\.tgz$/)].$replace(version, /^llvm-(\\d+)\\..*$/, \"$1\")).{\"version\": $}]}"
       ]
     },
     "openbsd-releases": {
