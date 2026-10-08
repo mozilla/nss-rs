@@ -19,6 +19,7 @@
       ],
       "matchStrings": [
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+container:\\s*\\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+[A-Z_]+: \\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*cargo install \\S+?@(?<currentValue>[0-9][0-9.]*)",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm%(?<currentValue>[0-9]+)",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/",
@@ -74,6 +75,16 @@
         "netbsd"
       ],
       "versioning": "loose"
+    },
+    {
+      "description": "Renovate releases several times a day; update at most monthly.",
+      "matchDepNames": [
+        "renovate/renovate"
+      ],
+      "schedule": [
+        "* * 1-7 * *"
+      ],
+      "updateNotScheduled": false
     }
   ],
   "customDatasources": {
