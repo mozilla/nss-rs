@@ -22,9 +22,19 @@
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+[A-Z_]+: \\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*cargo install \\S+?@(?<currentValue>[0-9][0-9.]*)",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm%(?<currentValue>[0-9]+)",
-        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/",
-        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+release: \"(?<currentValue>[0-9]+\\.[0-9]+)\""
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/"
       ]
+    },
+    {
+      "description": "VM releases, limited to those the pinned vmactions/*-vm commit has a conf/<release>.conf for",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "uses: vmactions/(?<vmRepo>[a-z]+-vm)@(?<sha>[0-9a-f]{40})[^\\n]*\\n\\s+with:\\n\\s+# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+release: \"(?<currentValue>[0-9]+\\.[0-9]+)\""
+      ],
+      "registryUrlTemplate": "https://api.github.com/repos/vmactions/{{{vmRepo}}}/contents/conf?ref={{{sha}}}"
     }
   ],
   "packageRules": [
@@ -94,25 +104,10 @@
         "{\"releases\": [$distinct(releases[$match(version, /^llvm-\\d+\\.\\d+\\.\\d+(p\\d+)?\\.tgz$/)].$replace(version, /^llvm-(\\d+)\\..*$/, \"$1\")).{\"version\": $}]}"
       ]
     },
-    "openbsd-releases": {
-      "defaultRegistryUrlTemplate": "https://cdn.openbsd.org/pub/OpenBSD/",
-      "format": "html",
+    "vmactions-releases": {
+      "format": "json",
       "transformTemplates": [
-        "{\"releases\": releases[$match(version, /^\\d+\\.\\d+\\//)].{\"version\": $replace(version, /\\/$/, \"\")}}"
-      ]
-    },
-    "freebsd-releases": {
-      "defaultRegistryUrlTemplate": "https://download.freebsd.org/releases/amd64/amd64/",
-      "format": "html",
-      "transformTemplates": [
-        "{\"releases\": releases[$match(version, /^\\d+[.]\\d+-RELEASE[/]/)].{\"version\": $replace(version, /-RELEASE[/]$/, \"\")}}"
-      ]
-    },
-    "netbsd-releases": {
-      "defaultRegistryUrlTemplate": "https://cdn.netbsd.org/pub/NetBSD/",
-      "format": "html",
-      "transformTemplates": [
-        "{\"releases\": releases[$match(version, /^NetBSD-\\d+[.]\\d+[/]$/)].{\"version\": $replace($replace(version, /^NetBSD-/, \"\"), /[/]$/, \"\")}}"
+        "{\"releases\": [$[$match(name, /^\\d+[.]\\d+[.]conf$/)].{\"version\": $replace(name, /[.]conf$/, \"\")}]}"
       ]
     }
   }
