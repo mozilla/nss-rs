@@ -4,12 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ptr;
+use std::{os::raw::c_uint, ptr};
 
 // use std::ptr::null;
 // use std::ptr::null_mut;
 use crate::{
-    PrivateKey, PublicKey, SECItem, SECItemBorrowed, der,
+    PrivateKey, PublicKey, SECItem, SECItemBorrowed, SECItemType, der,
     err::{Error, IntoResult as _, secstatus_to_res},
     init,
     p11::{
@@ -18,7 +18,7 @@ use crate::{
         CKM_ECDH1_DERIVE, CKM_ECDSA, CKM_EDDSA, CKM_SHA512_HMAC, KU_ALL,
         PK11_ExportDERPrivateKeyInfo, PK11_GenerateKeyPair,
         PK11_ImportDERPrivateKeyInfoAndReturnKey, PK11_ImportPublicKey, PK11_PubDeriveWithKDF,
-        PK11_ReadRawAttribute, PK11ObjectType::PK11_TypePrivKey,
+        PK11_ReadRawAttribute, PK11_SignatureLen, PK11ObjectType::PK11_TypePrivKey,
         SECKEY_DecodeDERSubjectPublicKeyInfo, Slot,
     },
     ssl::PRBool,
@@ -261,22 +261,40 @@ pub fn sign(
     mechanism: CK_MECHANISM_TYPE,
 ) -> Result<Vec<u8>, Error> {
     init()?;
-    let data_signature = vec![0u8; 0x40];
+
+    // Size the output buffer to the key. A fixed 64-byte buffer only fits P-256
+    // and Ed25519; a P-384 (96-byte) or P-521 (132-byte) signature overflows it
+    // and NSS returns SEC_ERROR_OUTPUT_LEN instead of signing.
+    let sig_len = usize::try_from(unsafe {
+        PK11_SignatureLen(private_key.as_mut().ok_or(Error::InvalidInput)?)
+    })
+    .map_err(|_| Error::InvalidInput)?;
+    if sig_len == 0 {
+        return Err(Error::last_nss_error());
+    }
+    let mut data_signature = vec![0u8; sig_len];
 
     let mut data_to_sign = SECItemBorrowed::wrap(data)?;
-    let mut signature = SECItemBorrowed::wrap(&data_signature)?;
+    // NSS writes the signature into this item, so it must reference a mutable
+    // buffer. `SECItemBorrowed::wrap` takes a shared slice and is const-only, so
+    // build the output item from a mutable pointer directly.
+    let mut signature = SECItem {
+        type_: SECItemType::siBuffer,
+        data: data_signature.as_mut_ptr(),
+        len: c_uint::try_from(sig_len)?,
+    };
     unsafe {
         secstatus_to_res(crate::p11::PK11_SignWithMechanism(
             private_key.as_mut().ok_or(Error::InvalidInput)?,
             mechanism,
             ptr::null_mut(),
-            signature.as_mut(),
+            &raw mut signature,
             data_to_sign.as_mut(),
         ))?;
-
-        let signature = signature.as_slice().to_vec();
-        Ok(signature)
     }
+
+    data_signature.truncate(usize::try_from(signature.len)?);
+    Ok(data_signature)
 }
 
 pub fn sign_ecdsa(private_key: &PrivateKey, data: &[u8]) -> Result<Vec<u8>, Error> {
