@@ -5,7 +5,10 @@
 // except according to those terms.
 
 use nss_rs::{
-    ec::{EcCurve, ecdh, ecdh_keygen, export_ec_private_key_from_raw},
+    ec::{
+        EcCurve, convert_to_public, ecdh, ecdh_keygen, export_ec_private_key_from_raw, sign_ecdsa,
+        verify_ecdsa,
+    },
     generate_ech_keys,
 };
 use test_fixture::fixture_init;
@@ -118,4 +121,49 @@ fn keygen_x25519() {
     let key = ecdh_keygen(&EcCurve::X25519).unwrap();
 
     assert_eq!(32, key.public.key_data().unwrap().len());
+}
+
+/// Check that `convert_to_public()` returns keys that work the same as the original key.
+///
+/// Regression test for <https://github.com/mozilla/nss-rs/issues/138>.
+#[test]
+fn check_convert_to_public() {
+    fixture_init();
+
+    let pair = ecdh_keygen(&EcCurve::P256).expect("ecdh_keygen");
+    let other = ecdh_keygen(&EcCurve::P256).expect("ecdh_keygen");
+
+    // Convert the private key into the same public key.
+    let converted = convert_to_public(&pair.private).expect("convert_to_public");
+
+    let d = b"Hello";
+    let signature = sign_ecdsa(&pair.private, d).expect("sign_ecdsa");
+
+    // Verify a signature with both the original and converted keys.
+    assert!(verify_ecdsa(&pair.public, d, &signature).expect("orig/verify_ecdsa"));
+    assert!(verify_ecdsa(&converted, d, &signature).expect("conv/verify_ecdsa"));
+
+    // Verify ecdh() derives the same value with a converted key.
+    let ecdh_orig = ecdh(&other.private, &pair.public).expect("orig/ecdh");
+    let ecdh_conv = ecdh(&other.private, &converted).expect("conv/ecdh");
+    let ecdh_other = ecdh(&pair.private, &other.public).expect("other/ecdh");
+    assert_eq!(ecdh_orig, ecdh_conv);
+    assert_eq!(ecdh_orig, ecdh_other);
+
+    // `key_data()` should return a raw SEC.1 encoded point in uncompressed form.
+    let key_data_orig = pair.public.key_data().expect("orig/key_data");
+    assert_eq!(65, key_data_orig.len());
+    assert_eq!(4, key_data_orig[0]);
+
+    let key_data_conv = converted.key_data().expect("conv/key_data");
+    assert_eq!(key_data_orig, key_data_conv);
+
+    // `key_data_alt()` should return the same thing, but wrapped in a DER BitString.
+    let key_data_alt_orig = pair.public.key_data_alt().expect("orig/key_data_alt");
+    assert_eq!(67, key_data_alt_orig.len());
+    assert_eq!([4, 65], &key_data_alt_orig[..2]);
+    assert_eq!(key_data_orig, &key_data_alt_orig[2..]);
+
+    let key_data_alt_conv = converted.key_data_alt().expect("conv/key_data_alt");
+    assert_eq!(key_data_alt_orig, key_data_alt_conv);
 }
