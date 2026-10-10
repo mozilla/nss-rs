@@ -136,12 +136,11 @@ impl RecordProtectionOps for RecordProtection {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        if output.len()
-            < input
-                .len()
-                .checked_add(TAG_LEN)
-                .ok_or(Error::IntegerOverflow)?
-        {
+        let total = input
+            .len()
+            .checked_add(TAG_LEN)
+            .ok_or(Error::IntegerOverflow)?;
+        if output.len() < total {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
         let out_ptr = output.as_mut_ptr();
@@ -152,7 +151,7 @@ impl RecordProtectionOps for RecordProtection {
                 count,
                 aad,
                 out_ptr,
-                input.len(),
+                total,
                 out_ptr.add(input.len()),
                 input.as_ptr(),
                 input.len(),
