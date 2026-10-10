@@ -4,7 +4,7 @@ self-hosted-runner:
   labels:
     - moonshot
     - moonshot-exp
-    - codspeed-macro
+    - codspeed-macro-x86-ryzen-9950x-ubuntu-24-04
 
 # actionlint does not understand the `$/` syntax (an action in this repo at the
 # running commit), so ignore its "ref is missing" error where we use it.
