@@ -24,6 +24,7 @@ use nss_rs::{
     hash::{HashAlgorithm, hash},
     hkdf,
     hmac::HmacAlgorithm,
+    random,
 };
 use test_fixture::fixture_init;
 
@@ -112,9 +113,17 @@ fn ec(c: &mut Criterion) {
     group.finish();
 }
 
+/// QUIC draws connection IDs, stateless reset tokens and similar from here.
+fn rng(c: &mut Criterion) {
+    let mut group = c.benchmark_group("random");
+    group.bench_function("1", |b| b.iter(random::<1>));
+    group.bench_function("16", |b| b.iter(random::<16>));
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = { fixture_init(); Criterion::default() };
-    targets = key_schedule, digest, ec
+    targets = key_schedule, digest, ec, rng
 }
 criterion_main!(benches);

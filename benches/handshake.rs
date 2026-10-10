@@ -17,7 +17,7 @@ use std::hint::black_box;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use nss_rs::{
     AuthenticationStatus, Client, Server, TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256,
-    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, constants::Group,
+    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, constants::Group,
 };
 use test_fixture::{fixture_init, now};
 
@@ -48,6 +48,8 @@ fn handshakes(c: &mut Criterion) {
     for (name, grp) in [
         ("x25519", TLS_GRP_EC_X25519),
         ("secp256r1", TLS_GRP_EC_SECP256R1),
+        // Neqo's default key exchange.
+        ("mlkem768x25519", TLS_GRP_KEM_MLKEM768X25519),
     ] {
         group.bench_function(BenchmarkId::new("full", name), |b| {
             b.iter(|| handshake(&mut agents(black_box(grp))));
