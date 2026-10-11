@@ -239,11 +239,6 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     /// Create an empty `SECItemBorrowed`.
     ///
     /// This can be used to pass an empty, read-only item as an argument.
-    ///
-    /// It is safe to let the caller specify any lifetime here because no
-    /// borrowing is actually taking place.  However, it is not safe to pass the
-    /// resulting struct to functions that modify this: the lifetime will not
-    /// be updated to match.
     #[must_use]
     pub const fn make_empty() -> Self {
         SECItemBorrowed {
@@ -282,7 +277,7 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     #[deprecated(note = "use ParamItem::wrap")]
     #[expect(clippy::unnecessary_wraps, reason = "semver")]
     pub const fn wrap_struct<T>(v: &'a T) -> Res<Self> {
-        let data = &raw const v;
+        let data = &raw const *v;
         Ok(Self {
             inner: SECItem::raw(data.cast_mut().cast(), size_of::<T>()),
             phantom_data: PhantomData,
@@ -341,7 +336,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     /// Wrap a struct in a `SECItem` for use as a parameter.
     #[must_use]
     pub const fn wrap(v: &'a T) -> Self {
-        let p: *const T = &raw const *v;
+        let p = &raw const *v;
         Self {
             inner: SECItem::raw(p.cast_mut().cast(), size_of::<T>()),
             marker: PhantomData,
@@ -400,11 +395,20 @@ mod tests {
     }
 
     #[test]
-    fn param_len_is_size_of() {
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "pointer round trip should retain alignment"
+    )]
+    fn param_item() {
         let v = 0x1234_5678_u32;
+        let item = ParamItem::wrap(&v);
         assert_eq!(
-            usize::try_from(unsafe { (*ParamItem::wrap(&v).as_ptr()).len }).unwrap(),
+            usize::try_from(unsafe { (*item.as_ptr()).len }).unwrap(),
             size_of::<u32>()
+        );
+        assert_eq!(
+            unsafe { (*item.as_ptr()).data }.cast_const().cast::<u32>(),
+            &raw const v
         );
     }
 }
