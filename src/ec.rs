@@ -121,7 +121,6 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
     let curve_oid = ec_curve_to_oid(curve);
     let oid_bytes = der::object_id(&curve_oid)?;
     let oid = SECItemBorrowed::wrap(&oid_bytes);
-    let oid_ptr = oid.as_ptr();
 
     // Get the Mechanism based on the Curve and its use
     let ckm = ec_curve_to_ckm(curve);
@@ -137,7 +136,7 @@ pub fn ecdh_keygen(curve: &EcCurve) -> Result<EcdhKeypair, Error> {
         let sk = PK11_GenerateKeyPair(
             *slot,
             ckm,
-            oid_ptr.cast_mut().cast(), // const_cast to void*!
+            oid.as_void_ptr(),
             &raw mut pk_ptr,
             PRBool::from(false),
             PRBool::from(false),

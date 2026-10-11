@@ -4,15 +4,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{marker::PhantomData, os::raw::c_uint, ptr, slice::Iter};
+use std::{ffi::c_void, marker::PhantomData, os::raw::c_uint, ptr, slice::Iter};
 
 pub use crate::nss_prelude::{SECItem, SECItemArray, SECItemType};
 use crate::{
+    Res,
     nss_prelude::{PRBool, SECITEM_FreeArray, SECITEM_FreeItem},
     null_safe_slice,
 };
 
 impl SECItem {
+    #[expect(clippy::cast_possible_truncation, reason = "input explicitly checked")]
+    const fn raw(data: *mut u8, len: usize) -> Self {
+        assert!(len <= c_uint::MAX as usize, "item is crazy big");
+        SECItem {
+            type_: SECItemType::siBuffer,
+            data,
+            len: len as c_uint,
+        }
+    }
+
     /// Return contents as a slice.
     ///
     /// Unsafe due to calling `from_raw_parts`, or if 'a outlives &self. This
@@ -100,7 +111,7 @@ impl<'a> Iterator for ScopedSECItemArrayIterator<'a> {
     }
 }
 
-/// An owned `SECItem`.
+/// An owned `SECItem` for memory allocated by NSS.
 ///
 /// The `SECItem` structure is allocated by Rust. The buffer referenced by the
 /// `SECItem` is allocated by NSS. `SECITEM_FreeItem` will be called to free the
@@ -137,22 +148,24 @@ impl SECItemMut {
     #[must_use]
     pub const fn make_empty() -> Self {
         Self {
-            inner: SECItem {
-                type_: SECItemType::siBuffer,
-                data: ptr::null_mut(),
-                len: 0,
-            },
+            inner: SECItem::raw(ptr::null_mut(), 0),
         }
     }
 }
 
-/// A borrowed `SECItem`.
-///
-/// The `SECItem` structure is allocated by Rust. The buffer referenced by the
-/// `SECItem` may be allocated either by Rust or NSS. The `SECItem` does not own the
-/// buffer and will not free it when dropped.
+/// A borrowed `SECItem` that references a Rust-allocated slice.
 ///
 /// This can be used to pass a reference to some borrowed rust memory to NSS.
+/// Both `const` and `mut` slices can be wrapped using
+/// [`SECItemBorrowed::wrap`] and [`SECItemBorrowed::wrap_mut`] respectively.
+/// Only the latter exposes [`SECItemBorrowed::as_mut_ptr`]. This follows the
+/// convention in NSS to take a `*mut SECItem` when the item is written to
+/// and a `*const SECItem` for read-only inputs
+/// (despite the `SECItem.data` pointer not being `const`).
+///
+/// This convention is imperfect, as some NSS functions allocate or reallocate
+/// when provided with a `*mut SECItem`.  This type is NOT safe to use in that case;
+/// use [`SECItemMut`] instead.
 ///
 /// Warning: avoid the following pattern:
 ///
@@ -177,11 +190,16 @@ impl SECItemMut {
 /// ```
 ///
 /// Many NSS functions are not const-safe, so you might need to cast the pointer
-/// to turn it into `*mut SECItem` or, worse, `*mut c_void`:
+/// to turn it into `*mut SECItem`:
 /// ```ignore
 /// let wrapper = SECItemBorrowed::wrap(&buf);
-/// unsafe { NSS_ConstUnsafeFn(wrapper.as_ptr().cast_mut()) };   // const_cast
-/// unsafe { NSS_VoidStar(wrapper.as_ptr().cast_mut().cast()) }; // `void*` arg
+/// unsafe { NSS_ConstUnsafe(wrapper.as_ptr().cast_mut()) };   // const_cast
+/// ```
+///
+/// For functions that take `*mut c_void`, there is a helper.
+/// ```ignore
+/// let wrapper = SECItemBorrowed::wrap(&buf);
+/// unsafe { NSS_VoidStar(wrapper.as_void_ptr()) };
 /// ```
 #[repr(transparent)]
 pub struct SECItemBorrowed<T> {
@@ -192,12 +210,13 @@ pub struct SECItemBorrowed<T> {
 impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
     /// Return contents as a slice.
     #[must_use]
-    #[cfg(test)]
+    #[cfg_attr(not(test), deprecated)] // TODO: switch back to `cfg(test)`
     pub fn as_slice(&self) -> &[u8] {
         unsafe { self.inner.as_slice() }
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
@@ -206,6 +225,13 @@ impl<T: AsRef<[u8]>> SECItemBorrowed<T> {
     #[must_use]
     pub const fn as_ptr(&self) -> *const SECItem {
         &raw const self.inner
+    }
+
+    /// Get a mutable `void*` pointer to the item,
+    /// as needed by some PKCS#11 functions.
+    #[must_use]
+    pub const fn as_void_ptr(&self) -> *mut c_void {
+        self.as_ptr().cast_mut().cast()
     }
 }
 
@@ -221,11 +247,7 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     #[must_use]
     pub const fn make_empty() -> Self {
         SECItemBorrowed {
-            inner: SECItem {
-                type_: SECItemType::siBuffer,
-                data: ptr::null_mut(),
-                len: 0,
-            },
+            inner: SECItem::raw(ptr::null_mut(), 0),
             phantom_data: PhantomData,
         }
     }
@@ -245,20 +267,26 @@ impl<'a> SECItemBorrowed<&'a [u8]> {
     ///
     /// [`wrap_mut`]: Self::wrap_mut
     #[must_use]
-    pub fn wrap(buf: &'a [u8]) -> Self {
+    pub const fn wrap(buf: &'a [u8]) -> Self {
         let data = if buf.is_empty() {
             ptr::null_mut()
         } else {
             buf.as_ptr().cast_mut().cast()
         };
         Self {
-            inner: SECItem {
-                type_: SECItemType::siBuffer,
-                data,
-                len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
-            },
+            inner: SECItem::raw(data, buf.len()),
             phantom_data: PhantomData,
         }
+    }
+
+    #[deprecated(note = "use ParamItem::wrap")]
+    #[expect(clippy::unnecessary_wraps, reason = "semver")]
+    pub const fn wrap_struct<T>(v: &'a T) -> Res<Self> {
+        let data = &raw const v;
+        Ok(Self {
+            inner: SECItem::raw(data.cast_mut().cast(), size_of::<T>()),
+            phantom_data: PhantomData,
+        })
     }
 }
 
@@ -280,18 +308,14 @@ impl<'a> SECItemBorrowed<&'a mut [u8]> {
     /// # Panics
     /// If the slice is so large that it is longer than a `c_uint` can handle.
     #[must_use]
-    pub fn wrap_mut(buf: &'a mut [u8]) -> Self {
+    pub const fn wrap_mut(buf: &'a mut [u8]) -> Self {
         let data = if buf.is_empty() {
             ptr::null_mut()
         } else {
             buf.as_mut_ptr().cast()
         };
         Self {
-            inner: SECItem {
-                type_: SECItemType::siBuffer,
-                data,
-                len: c_uint::try_from(buf.len()).expect("slice is crazy big"),
-            },
+            inner: SECItem::raw(data, buf.len()),
             phantom_data: PhantomData,
         }
     }
@@ -316,14 +340,10 @@ pub struct ParamItem<'a, T> {
 impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     /// Wrap a struct in a `SECItem` for use as a parameter.
     #[must_use]
-    pub fn wrap(v: &'a T) -> Self {
+    pub const fn wrap(v: &'a T) -> Self {
         let p: *const T = &raw const *v;
         Self {
-            inner: SECItem {
-                type_: SECItemType::siBuffer,
-                data: p.cast_mut().cast(),
-                len: c_uint::try_from(size_of::<T>()).expect("struct is crazy big"),
-            },
+            inner: SECItem::raw(p.cast_mut().cast(), size_of::<T>()),
             marker: PhantomData,
         }
     }
@@ -348,6 +368,7 @@ mod tests {
         assert_eq!(item.as_slice(), DATA);
         assert_eq!(item.len(), DATA.len());
         assert_eq!(unsafe { (*item.as_ptr()).data }.cast_const(), DATA.as_ptr());
+        assert_eq!(item.as_void_ptr().cast_const().cast(), item.as_ptr());
     }
 
     #[test]

@@ -90,13 +90,30 @@ pub mod nss_prelude {
 
     include!(concat!(env!("OUT_DIR"), "/nss_prelude.rs"));
 }
+#[deprecated]
+pub use nss_prelude::SECItemType;
 pub use nss_prelude::SECStatus;
+// siAsciiNameString, siAsciiString, siBMPString, siBuffer, siCipherDataBuffer, siClearDataBuffer,
+// siDERCertBuffer, siDERNameBuffer, siDEROID, siEncodedCertBuffer, siEncodedNameBuffer,
+// siGeneralizedTime, siUTCTime, siUTF8String, siUnsignedInteger, siVisibleString,
 
 #[expect(non_upper_case_globals, reason = "Code is bindgen-generated.")]
 mod nss {
     use crate::nss_prelude::*;
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
+
+#[deprecated(note = "use types in nss_rs::item instead")]
+pub mod util {
+    pub use crate::item::{
+        SECItem, SECItemArray, SECItemMut, ScopedSECItem, ScopedSECItemArray,
+        ScopedSECItemArrayIterator,
+    };
+    pub type SECItemBorrowed<'a> = crate::item::SECItemBorrowed<&'a [u8]>;
+}
+#[deprecated(note = "use types in nss_rs::item instead")]
+#[expect(deprecated)]
+pub use crate::util::*;
 
 enum NssLoaded {
     External,

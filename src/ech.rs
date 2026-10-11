@@ -111,7 +111,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 CKM_EC_KEY_PAIR_GEN,
-                param_item.as_ptr().cast_mut().cast(),
+                param_item.as_void_ptr(),
                 &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
                 CKF_DERIVE,
@@ -128,7 +128,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 CKM_EC_KEY_PAIR_GEN,
-                param_item.as_ptr().cast_mut().cast(),
+                param_item.as_void_ptr(),
                 &raw mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
                 CKF_DERIVE,
