@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+        uses: mozilla/actions/toolchains@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
 
       - id: nss-meta
         uses: $/.github/actions/nss-metadata
@@ -81,7 +81,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+      - uses: mozilla/actions/rust@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -161,7 +161,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+      - uses: mozilla/actions/rust@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
         with:
           version: stable
           tools: cargo-hack
