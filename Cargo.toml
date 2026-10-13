@@ -170,12 +170,12 @@ criterion = { package = "codspeed-criterion-compat", version = "5", default-feat
 test-fixture = { path = "test-fixture" }
 
 [build-dependencies]
-bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.73", default-features = false, features = ["runtime"] }
 mozbuild = { version = "0.1", default-features = false, optional = true }
 pkg-config = { version = "0.3.33", default-features = false }
 serde = { version = "1", default-features = false, features = ["std"] }
 serde_derive = { version = "1", default-features = false }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 
 [target."cfg(windows)".dependencies]
 windows = { version = ">=0.60,<0.63", features = ["Win32_Security_Authentication_Identity"] }
