@@ -11,6 +11,7 @@ use crate::nss_prelude::*;
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 #[expect(non_snake_case, dead_code, reason = "Code is bindgen-generated.")]
 mod codes {
+    #![allow(clippy::allow_attributes, reason = "Code is bindgen-generated.")]
     include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
     include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
 }
