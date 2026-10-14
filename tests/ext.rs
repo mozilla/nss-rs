@@ -311,13 +311,18 @@ fn extension_length_matches_bytes_written() {
     assert!(handler.borrow().oversize_rejected);
 
     let ch = &records.into_iter().next().expect("one record").data;
+    // Search for the complete extension: extension_type 0xffff, a 2-byte
+    // length, then the body.  Matching all 14 bytes keeps a collision with
+    // the random parts of the ClientHello out of reach.
     let payload = ChunkedExtensionHandler::PAYLOAD;
-    let at = ch
-        .windows(payload.len())
-        .position(|w| w == payload)
-        .expect("extension body is on the wire");
-    // extension_type 0xffff then a 2-byte length, immediately before the body.
     let len = u16::try_from(payload.len()).expect("length fits");
-    let [hi, lo] = len.to_be_bytes();
-    assert_eq!(&ch[at - 4..at], &[0xff, 0xff, hi, lo]);
+    let ext: Vec<u8> = [0xff, 0xff]
+        .into_iter()
+        .chain(len.to_be_bytes())
+        .chain(payload.iter().copied())
+        .collect();
+    assert!(
+        ch.windows(ext.len()).any(|w| w == ext),
+        "complete extension is on the wire"
+    );
 }
