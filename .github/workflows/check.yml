@@ -311,6 +311,43 @@ jobs:
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 
+  check-git-fallback:
+    name: Check the git fetch fallback for NSS/NSPR
+    runs-on: ubuntu-24.04
+    env:
+      NSS_NO_PKG_CONFIG: 1 # The pkg-config crate honours <LIB>_NO_PKG_CONFIG
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: mozilla/actions/rust@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+          rust-cache: false
+
+      - uses: mozilla/actions/nss@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
+        with:
+          deps-only: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test against a fresh git fetch of NSS/NSPR, then reusing it
+        run: |
+          # deps-only exports NSS_DIR/NSS_PREBUILT for a checkout it never fetches.
+          unset NSS_DIR NSS_PREBUILT
+          cargo test --locked
+          # Fail loudly if anything (system NSS, a leaked NSS_DIR) bypassed the fetch.
+          git_dir=$(find target -type d -path '*/out/nss/.git' -print -quit)
+          test -n "$git_dir"
+          nss=${git_dir%/.git}
+          touch "$nss/.reused"
+          # Touch a rerun-if-changed input, or Cargo skips build.rs and this tests nothing.
+          touch Cargo.toml
+          cargo test --locked
+          # git_fetch() replaces the checkout wholesale, so a re-fetch would drop this marker.
+          test -f "$nss/.reused"
+
   check-vm:
     name: Run checks for VM-only platforms
     runs-on: ubuntu-24.04
