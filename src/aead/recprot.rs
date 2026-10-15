@@ -14,8 +14,9 @@ use super::{
     expand_label, expand_label_buf, split_tag, xor_nonce,
 };
 use crate::{
-    Cipher, Error, Res, SECItemBorrowed, SymKey, Version,
+    Cipher, Error, Res, SymKey, Version,
     err::{sec::SEC_ERROR_BAD_DATA, secstatus_to_res},
+    item::SECItemBorrowed,
     p11::{
         CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE, CKG_NO_GENERATE, Context, PK11_AEADOp,
         PK11_CreateContextBySymKey,
@@ -38,7 +39,7 @@ fn make_ctx(
             mech,
             op,
             **key,
-            SECItemBorrowed::wrap(nonce_base.as_slice())?.as_ref(),
+            SECItemBorrowed::wrap(nonce_base.as_slice()).as_ptr(),
         )
     };
     Context::from_ptr(ptr)

@@ -9,9 +9,10 @@
 use std::ptr;
 
 use crate::{
-    Error, SECItemBorrowed, SymKey,
+    Error, SymKey,
     err::IntoResult as _,
     hash::{self, HashAlgorithm},
+    item::SECItemBorrowed,
     p11::{
         CK_MECHANISM_TYPE, CKA_SIGN, CKM_SHA256_HMAC, CKM_SHA384_HMAC, CKM_SHA512_HMAC,
         PK11_CreateContextBySymKey, PK11_DigestFinal, PK11_DigestOp, PK11_ImportSymKey, PK11Origin,
@@ -102,7 +103,7 @@ impl HmacAlgorithm {
                 self.ckm(),
                 PK11Origin::PK11_OriginUnwrap,
                 CKA_SIGN,
-                SECItemBorrowed::wrap(key)?.as_mut(),
+                SECItemBorrowed::wrap(key).as_ptr().cast_mut(), // ! const_cast
                 ptr::null_mut(),
             )
         }
@@ -118,7 +119,7 @@ impl HmacAlgorithm {
 
         let param = SECItemBorrowed::make_empty();
         let context =
-            unsafe { PK11_CreateContextBySymKey(self.ckm(), CKA_SIGN, **key, param.as_ref()) }
+            unsafe { PK11_CreateContextBySymKey(self.ckm(), CKA_SIGN, **key, param.as_ptr()) }
                 .into_result()?;
 
         unsafe { PK11_DigestOp(*context, data.as_ptr(), data_len) }.into_result()?;

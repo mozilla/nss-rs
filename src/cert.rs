@@ -12,9 +12,10 @@ use std::{
 
 use log::error;
 
+pub use crate::item::{ScopedSECItemArray, ScopedSECItemArrayIterator};
 use crate::{
-    Res, SECItem, SECItemArray, ScopedSECItemArray, ScopedSECItemArrayIterator, experimental_api,
-    nss_prelude::SECStatus,
+    Res, SECStatus,
+    item::{SECItem, SECItemArray},
     null_safe_slice, p11,
     prio::PRFileDesc,
     ssl::{self, SSL_PeerSignedCertTimestamps, SSL_PeerStapledOCSPResponses},
@@ -96,7 +97,7 @@ impl CertificateInfo {
 
     #[must_use]
     pub fn iter(&self) -> ScopedSECItemArrayIterator<'_> {
-        self.certs.into_iter()
+        self.certs.iter()
     }
 
     #[must_use]
