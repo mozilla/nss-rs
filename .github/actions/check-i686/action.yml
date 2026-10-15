@@ -23,7 +23,7 @@ runs:
         fi
         sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib
 
-    - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+    - uses: mozilla/actions/rust@a2f86e00e93d54a5c56689e15633eeb3ef1bf671 # v3.1.0
       with:
         version: stable
         targets: i686-unknown-linux-gnu

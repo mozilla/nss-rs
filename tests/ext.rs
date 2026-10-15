@@ -10,7 +10,7 @@ use handshake::forward_records;
 use nss_rs::{
     AuthenticationStatus, Client, Error, HandshakeState, Server,
     constants::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
-    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter, ExtensionWriterResult},
     generate_ech_keys,
 };
 use test_fixture::{damage_ech_config, fixture_init, now};
@@ -58,13 +58,13 @@ impl ExtensionHandler for SimpleExtensionHandler {
         &mut self,
         msg: HandshakeMessage,
         _ch_outer: bool,
-        d: &mut [u8],
+        w: &mut ExtensionWriter<'_>,
     ) -> ExtensionWriterResult {
         match msg {
             TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => {
                 self.written = true;
-                d[0] = 77;
-                ExtensionWriterResult::Write(1)
+                w.write(&[77]).expect("fits");
+                ExtensionWriterResult::Write
             }
             _ => ExtensionWriterResult::Skip,
         }
@@ -136,7 +136,7 @@ impl ExtensionHandler for EchExtensionHandler {
         &mut self,
         msg: HandshakeMessage,
         ch_outer: bool,
-        d: &mut [u8],
+        w: &mut ExtensionWriter<'_>,
     ) -> ExtensionWriterResult {
         match msg {
             TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => {
@@ -147,8 +147,8 @@ impl ExtensionHandler for EchExtensionHandler {
                     self.written_inner = true;
                     Self::INNER
                 };
-                d[..v.len()].copy_from_slice(v);
-                ExtensionWriterResult::Write(v.len())
+                w.write(v).expect("fits");
+                ExtensionWriterResult::Write
             }
             _ => ExtensionWriterResult::Skip,
         }
@@ -260,4 +260,69 @@ fn ech_retry() {
     assert_eq!(client.alert(), Some(121));
 
     // Note that we don't have a means of signaling the error to the server in this code.
+}
+
+/// Writes `PAYLOAD` one chunk at a time, after a write that doesn't fit.
+#[derive(Debug, Default)]
+struct ChunkedExtensionHandler {
+    oversize_rejected: bool,
+}
+
+impl ChunkedExtensionHandler {
+    const PAYLOAD: &[u8] = b"abcdefghij";
+}
+
+impl ExtensionHandler for ChunkedExtensionHandler {
+    fn write(
+        &mut self,
+        msg: HandshakeMessage,
+        _ch_outer: bool,
+        w: &mut ExtensionWriter<'_>,
+    ) -> ExtensionWriterResult {
+        if msg != TLS_HS_CLIENT_HELLO {
+            return ExtensionWriterResult::Skip;
+        }
+        // More than the buffer holds: rejected, and the cursor doesn't move.
+        let oversize = vec![0xff; w.remaining() + 1];
+        assert_eq!(w.write(&oversize), Err(Error::InvalidInput));
+        self.oversize_rejected = true;
+
+        let before = w.remaining();
+        for chunk in Self::PAYLOAD.chunks(3) {
+            w.write(chunk).expect("fits");
+        }
+        assert_eq!(before - w.remaining(), Self::PAYLOAD.len());
+        ExtensionWriterResult::Write
+    }
+}
+
+/// The length NSS puts on the wire is the number of bytes the handler wrote,
+/// so no part of NSS's buffer that the handler didn't write can be sent.
+#[test]
+fn extension_length_matches_bytes_written() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let handler = Rc::new(RefCell::new(ChunkedExtensionHandler::default()));
+    client
+        .extension_handler(0xffff, Rc::clone(&handler) as _)
+        .expect("client handler installed");
+
+    let records = client.handshake_raw(now(), None).expect("send ClientHello");
+    assert!(handler.borrow().oversize_rejected);
+
+    let ch = &records.into_iter().next().expect("one record").data;
+    // Search for the complete extension: extension_type 0xffff, a 2-byte
+    // length, then the body.  Matching all 14 bytes keeps a collision with
+    // the random parts of the ClientHello out of reach.
+    let payload = ChunkedExtensionHandler::PAYLOAD;
+    let len = u16::try_from(payload.len()).expect("length fits");
+    let ext: Vec<u8> = [0xff, 0xff]
+        .into_iter()
+        .chain(len.to_be_bytes())
+        .chain(payload.iter().copied())
+        .collect();
+    assert!(
+        ch.windows(ext.len()).any(|w| w == ext),
+        "complete extension is on the wire"
+    );
 }

@@ -80,7 +80,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+      - uses: mozilla/actions/rust@a2f86e00e93d54a5c56689e15633eeb3ef1bf671 # v3.1.0
         with:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -89,7 +89,7 @@ jobs:
       - id: meta
         uses: $/.github/actions/nss-metadata
 
-      - uses: mozilla/actions/nss@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+      - uses: mozilla/actions/nss@a2f86e00e93d54a5c56689e15633eeb3ef1bf671 # v3.1.0
         with:
           deps-only: true
 
@@ -186,7 +186,7 @@ jobs:
                 | (map(test("error(\\[[^]]*\\])?:|error [A-Z]+[0-9]+:|panicked at|^failures:")) | index(true) // 0) as $i
                 | .[$i:] | join("\n") | .[:20000])}' > verdict.json
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: nss-head-${{ matrix.os }}
@@ -227,7 +227,7 @@ jobs:
       HEAD_RESULT: ${{ needs.head.result }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: nss-head-*
           path: verdicts

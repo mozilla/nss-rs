@@ -595,6 +595,48 @@ fn ech_retry() {
     assert!(server.preinfo().unwrap().ech_accepted().unwrap());
 }
 
+/// The ECH public name is owned, so it stays valid after the agent (and the
+/// NSS socket state backing `echPublicName`) is torn down. Holding a borrow
+/// across the close used to read freed NSS memory.
+#[test]
+fn ech_public_name_outlives_agent() {
+    const PUBLIC_NAME: &str = "public.example";
+    const PRIVATE_NAME: &str = "private.example";
+    const CONFIG_ID: u8 = 7;
+
+    fixture_init();
+    let mut server = Server::new(&["key"]).unwrap();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();
+
+    let mut client = Client::new(PRIVATE_NAME, true).unwrap();
+    client
+        .enable_ech(damage_ech_config(server.ech_config()))
+        .unwrap();
+
+    let records = client.handshake_raw(now(), None).unwrap();
+    let records = forward_records(now(), &mut server, records).unwrap();
+    let records = forward_records(now(), &mut client, records).unwrap();
+    assert!(records.is_empty());
+
+    assert_eq!(
+        *client.state(),
+        HandshakeState::EchFallbackAuthenticationPending(String::from(PUBLIC_NAME))
+    );
+    client.authenticated(AuthenticationStatus::Ok);
+    let Err(Error::EchRetry(_)) = client.handshake_raw(now(), None) else {
+        panic!("expected EchRetry, state {:?}", client.state());
+    };
+
+    let preinfo = client.preinfo().unwrap();
+    let name = preinfo.ech_public_name().unwrap().unwrap();
+    assert_eq!(name, PUBLIC_NAME);
+
+    // Closing frees NSS's ssl3.hs.echPublicName. The owned `name` must survive.
+    client.close();
+    assert_eq!(name, PUBLIC_NAME);
+}
+
 #[test]
 fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     struct IncDecCompression {}

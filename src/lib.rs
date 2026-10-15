@@ -68,7 +68,7 @@ pub use self::{
         generate_keys as generate_ech_keys,
     },
     err::{Error, IntoResult, PRErrorCode, Res, secstatus_to_res},
-    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter, ExtensionWriterResult},
     p11::{PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
     secrets::SecretDirection,
@@ -191,12 +191,6 @@ pub fn init() -> Res<()> {
     let res = INITIALIZED.get_or_init(|| init_once(None));
     res.as_ref().map(|_| ()).map_err(Clone::clone)
 }
-
-/// The path to the default NSS database used for testing.
-pub const TEST_FIXTURE_DB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixture/db");
-
-/// The path to the FIPS-mode NSS database used for testing.
-pub const TEST_FIXTURE_DB_FIPS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixture/db-fips");
 
 /// Initialize with a database.
 ///
