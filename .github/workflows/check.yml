@@ -251,7 +251,7 @@ jobs:
               ACCEPT_KEYWORDS="~amd64" emerge -q --getbinpkg --quiet-build=y -1 dev-libs/nss
           - name: Slackware
             # renovate: depName=aclemons/slackware datasource=docker
-            container: aclemons/slackware:current-full@sha256:eae9ab4a4372052d96a4c6bbf18a2d7562e5290dfb0e457462d04efa29df22a2
+            container: aclemons/slackware:current-full@sha256:08a907a8a6b222e237acaf11335eb3b2cd01350244e85ea0ca950977a0750ddf
             # current-full ships a complete Slackware installation including all deps
             install: ":"
     defaults:
