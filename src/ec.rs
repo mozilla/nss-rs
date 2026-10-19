@@ -87,7 +87,7 @@ pub const OID_X25519_BYTES: &[u8] = &[
     0x2b, 0x06, 0x01, 0x04, 0x01, 0xDA, 0x47, 0x0F, 0x01,
 ];
 
-#[deprecated = "use der::object_id"]
+#[deprecated(since = "0.14.0", note = "use der::object_id")]
 pub fn object_id(val: &[u8]) -> Result<Vec<u8>, Error> {
     der::object_id(val)
 }

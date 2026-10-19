@@ -30,14 +30,14 @@ pub enum HmacAlgorithm {
     HMAC_SHA2_512,
 }
 
-#[deprecated = "use HmacAlgorithm::hash_alg instead"]
+#[deprecated(since = "0.16.3", note = "use HmacAlgorithm::hash_alg instead")]
 #[expect(clippy::trivially_copy_pass_by_ref, reason = "API compatibility")]
 #[must_use]
 pub const fn hmac_alg_to_hash_alg(alg: &HmacAlgorithm) -> HashAlgorithm {
     alg.hash_alg()
 }
 
-#[deprecated = "use HmacAlgorithm::hmac_len instead"]
+#[deprecated(since = "0.16.3", note = "use HmacAlgorithm::hmac_len instead")]
 #[expect(clippy::trivially_copy_pass_by_ref, reason = "API compatibility")]
 #[must_use]
 pub const fn hmac_alg_to_hmac_len(alg: &HmacAlgorithm) -> usize {
