@@ -20,7 +20,7 @@ use std::{
 
 use crate::{
     err::{Error, Res, secstatus_to_res},
-    nss_prelude::SECITEM_FreeItem,
+    nss_prelude::SECITEM_ZfreeItem,
     util::SECItemMut,
 };
 
@@ -150,7 +150,7 @@ impl PrivateKey {
         // use the scoped `Item` implementation.  This is OK as long as nothing
         // panics between `PK11_ReadRawAttribute` succeeding and here.
         unsafe {
-            SECITEM_FreeItem(key_item.as_mut(), PRBool::from(false));
+            SECITEM_ZfreeItem(key_item.as_mut(), PRBool::from(false));
         }
         Ok(key)
     }

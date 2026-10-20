@@ -101,7 +101,7 @@ impl SECItem {
 
 unsafe fn destroy_secitem(item: *mut SECItem) {
     unsafe {
-        SECITEM_FreeItem(item, PRBool::from(true));
+        SECITEM_ZfreeItem(item, PRBool::from(true));
     }
 }
 scoped_ptr!(ScopedSECItem, SECItem, destroy_secitem);
@@ -162,8 +162,8 @@ impl<'a> Iterator for ScopedSECItemArrayIterator<'a> {
 /// An owned `SECItem`.
 ///
 /// The `SECItem` structure is allocated by Rust. The buffer referenced by the
-/// `SECItem` is allocated by NSS. `SECITEM_FreeItem` will be called to free the
-/// buffer when the `SECItemMut` is dropped.
+/// `SECItem` is allocated by NSS. `SECITEM_ZfreeItem` will be called to zero and
+/// free the buffer when the `SECItemMut` is dropped.
 ///
 /// This is used with NSS functions that return a variable amount of data.
 #[repr(transparent)]
@@ -176,11 +176,12 @@ pub struct SECItemMut {
 
 impl Drop for SECItemMut {
     fn drop(&mut self) {
-        // FreeItem unconditionally frees the buffer referenced by the SECItem.
+        // ZfreeItem unconditionally zeroes and frees the buffer referenced by
+        // the SECItem, which can hold private key material.
         // If the second argument is true, it also frees the SECItem itself,
         // which we don't want to do, because rust owns that memory.
         unsafe {
-            SECITEM_FreeItem(&raw mut self.inner, PRBool::from(false));
+            SECITEM_ZfreeItem(&raw mut self.inner, PRBool::from(false));
         }
     }
 }

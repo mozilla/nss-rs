@@ -7,7 +7,7 @@
 
 [nss_prelude]
 types = ["SECItem", "SECItemArray", "SECItemStr", "SECStatus"]
-functions = ["SECITEM_FreeArray", "SECITEM_FreeItem"]
+functions = ["SECITEM_FreeArray", "SECITEM_FreeItem", "SECITEM_ZfreeItem"]
 enums = ["SECItemType", "_SECStatus"]
 
 [nss_ssl]
