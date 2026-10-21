@@ -408,6 +408,14 @@ fn resume() {
 }
 
 #[test]
+fn resumption_token_max_early_data_size() {
+    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
+    assert_eq!(token.max_early_data_size(), 0);
+    let (_, token) = resumption_setup(Resumption::WithZeroRtt);
+    assert_eq!(token.max_early_data_size(), 0xffff_ffff);
+}
+
+#[test]
 fn zero_rtt() {
     let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 

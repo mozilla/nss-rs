@@ -927,6 +927,7 @@ pub struct ResumptionToken {
     #[as_ref([u8])]
     token: Vec<u8>,
     expiration_time: Instant,
+    max_early_data_size: u32,
 }
 
 impl Debug for ResumptionToken {
@@ -934,6 +935,7 @@ impl Debug for ResumptionToken {
         f.debug_struct("ResumptionToken")
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
+            .field("max_early_data_size", &self.max_early_data_size)
             .finish()
     }
 }
@@ -941,15 +943,31 @@ impl Debug for ResumptionToken {
 impl ResumptionToken {
     #[must_use]
     pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
+        Self::new_with_early_data(token, expiration_time, 0)
+    }
+
+    #[must_use]
+    pub const fn new_with_early_data(
+        token: Vec<u8>,
+        expiration_time: Instant,
+        max_early_data_size: u32,
+    ) -> Self {
         Self {
             token,
             expiration_time,
+            max_early_data_size,
         }
     }
 
     #[must_use]
     pub const fn expiration_time(&self) -> Instant {
         self.expiration_time
+    }
+
+    /// The `max_early_data_size` of the session ticket, or 0 if it does not allow early data.
+    #[must_use]
+    pub const fn max_early_data_size(&self) -> u32 {
+        self.max_early_data_size
     }
 }
 
@@ -1005,6 +1023,7 @@ impl Client {
             return ssl::SECSuccess;
         }
         let expiration_time = unsafe { info.assume_init_ref() }.expirationTime;
+        let max_early_data_size = unsafe { info.assume_init_ref() }.maxEarlyDataSize;
         if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -1023,7 +1042,11 @@ impl Client {
             resumption.remove(0);
         }
         if let Ok(t) = Time::try_from(expiration_time) {
-            resumption.push(ResumptionToken::new(v, *t));
+            resumption.push(ResumptionToken::new_with_early_data(
+                v,
+                *t,
+                max_early_data_size,
+            ));
         }
         ssl::SECSuccess
     }
@@ -1048,6 +1071,12 @@ impl Client {
     #[must_use]
     pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         (*self.resumption).pop()
+    }
+
+    /// The resumption tokens received and not yet taken, oldest first.
+    #[must_use]
+    pub fn resumption_tokens(&self) -> &[ResumptionToken] {
+        &self.resumption
     }
 
     /// Check if there are more resumption tokens.
@@ -1449,7 +1478,7 @@ mod tests {
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
-            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?} }}"
+            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }
