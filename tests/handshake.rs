@@ -7,11 +7,8 @@
 use std::{mem, time::Instant};
 
 use log::info;
-use nss_rs::{
-    AntiReplay, AuthenticationStatus, Client, HandshakeState, RecordList, Res, ResumptionToken,
-    SecretAgent, Server, ZeroRttCheckResult, ZeroRttChecker,
-};
-use test_fixture::{anti_replay, fixture_init, now};
+use nss_rs::{AuthenticationStatus, HandshakeState, RecordList, Res, SecretAgent};
+use test_fixture::now;
 
 /// Consume records until the handshake state changes.
 pub fn forward_records(
@@ -88,91 +85,4 @@ pub fn connect_fail(client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(now(), client, server);
     assert!(!client.state().is_connected());
     assert!(!server.state().is_connected());
-}
-
-#[allow(
-    clippy::allow_attributes,
-    dead_code,
-    reason = "Yes, we currently don't construct WithoutZeroRtt and WithZeroRtt."
-)]
-#[derive(Clone, Copy, Debug)]
-pub enum Resumption {
-    WithoutZeroRtt,
-    WithZeroRtt,
-}
-
-pub const ZERO_RTT_TOKEN_DATA: &[u8] = b"zero-rtt-token";
-
-#[derive(Debug)]
-pub struct PermissiveZeroRttChecker {
-    resuming: bool,
-}
-
-impl Default for PermissiveZeroRttChecker {
-    fn default() -> Self {
-        Self { resuming: true }
-    }
-}
-
-impl ZeroRttChecker for PermissiveZeroRttChecker {
-    fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
-        if self.resuming {
-            assert_eq!(ZERO_RTT_TOKEN_DATA, token);
-        } else {
-            assert!(token.is_empty());
-        }
-        ZeroRttCheckResult::Accept
-    }
-}
-
-#[allow(clippy::allow_attributes, dead_code, reason = "False positive.")]
-fn zero_rtt_setup(mode: Resumption, client: &Client, server: &mut Server) -> Option<AntiReplay> {
-    matches!(mode, Resumption::WithZeroRtt).then(|| {
-        client.enable_0rtt().expect("should enable 0-RTT on client");
-
-        let anti_replay = anti_replay();
-        server
-            .enable_0rtt(
-                &anti_replay,
-                0xffff_ffff,
-                Box::new(PermissiveZeroRttChecker { resuming: false }),
-            )
-            .expect("should enable 0-RTT on server");
-        anti_replay
-    })
-}
-
-#[allow(clippy::allow_attributes, dead_code, reason = "OK for tests.")]
-#[must_use]
-pub fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, ResumptionToken) {
-    fixture_init();
-
-    let mut client = Client::new("server.example", true).expect("should create client");
-    let mut server = Server::new(&["key"]).expect("should create server");
-    let anti_replay = zero_rtt_setup(mode, &client, &mut server);
-
-    connect(&mut client, &mut server);
-
-    let client_info = client.info().expect("client is connected");
-    let server_info = server.info().expect("server is connected");
-    assert!(!client_info.resumed());
-    assert!(!server_info.resumed());
-    assert!(!client_info.early_data_accepted());
-    assert!(!server_info.early_data_accepted());
-
-    let server_records = server
-        .send_ticket(now(), ZERO_RTT_TOKEN_DATA)
-        .expect("ticket sent");
-    assert_eq!(server_records.len(), 1);
-    let client_records = client
-        .handshake_raw(now(), server_records.into_iter().next())
-        .expect("records ingested");
-    assert_eq!(client_records.len(), 0);
-
-    // `client` is about to go out of scope,
-    // but we only need to keep the resumption token, so clone it.
-    assert_eq!(client.resumption_tokens().len(), 1);
-    let token = client.resumption_token().expect("token is present");
-    assert!(client.resumption_tokens().is_empty());
-    (anti_replay, token)
 }
