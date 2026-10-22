@@ -1,7 +1,7 @@
 use std::ffi::CStr;
 
 use nss_rs::{
-    AntiReplay, AuthenticationStatus, Client, Error, HandshakeState, Res, ResumptionToken,
+    AntiReplay, AuthenticationStatus, Client, Error, HandshakeState, Record, Res, ResumptionToken,
     SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256, TLS_ALERT_ECH_REQUIRED,
     TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
@@ -492,6 +492,37 @@ fn resumption_token_max_early_data_size() {
     assert_eq!(token.max_early_data_size(), 0);
     let (_, token) = resumption_setup(Resumption::WithZeroRtt(1234));
     assert_eq!(token.max_early_data_size(), 1234);
+}
+
+#[test]
+fn resumption_tokens_from_one_input() {
+    const TICKETS: usize = 5;
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut client, &mut server);
+
+    let mut send_tickets = |n| -> Record {
+        let records: Vec<_> = (0..n)
+            .flat_map(|_| server.send_ticket(now(), &[]).expect("ticket sent"))
+            .collect();
+        let data: Vec<u8> = records.iter().flat_map(|r| r.data.clone()).collect();
+        Record::new(records[0].epoch, records[0].ct, &data)
+    };
+
+    // All tickets from one input are available before the next input.
+    let input = send_tickets(TICKETS);
+    client
+        .handshake_raw(now(), Some(input))
+        .expect("records ingested");
+    assert_eq!(client.resumption_tokens().len(), TICKETS);
+
+    // The next input evicts the oldest tickets beyond the limit first.
+    let input = send_tickets(1);
+    client
+        .handshake_raw(now(), Some(input))
+        .expect("records ingested");
+    assert_eq!(client.resumption_tokens().len(), TICKETS);
 }
 
 #[test]
