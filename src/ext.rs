@@ -20,7 +20,10 @@ use std::{
 use crate::{
     SECStatus,
     agentio::as_c_void,
-    constants::{Extension, HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
+    constants::{
+        Extension, HandshakeMessage, TLS_ALERT_UNSUPPORTED_EXTENSION, TLS_HS_CLIENT_HELLO,
+        TLS_HS_ENCRYPTED_EXTENSIONS,
+    },
     err::{Error, Res},
     nss_prelude::PRBool,
     null_safe_slice,
@@ -131,7 +134,7 @@ pub trait ExtensionHandler {
     fn handle(&mut self, msg: HandshakeMessage, _d: &[u8]) -> ExtensionHandlerResult {
         match msg {
             TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => ExtensionHandlerResult::Ok,
-            _ => ExtensionHandlerResult::Alert(110), // unsupported_extension
+            _ => ExtensionHandlerResult::Alert(TLS_ALERT_UNSUPPORTED_EXTENSION),
         }
     }
 }

@@ -2,9 +2,9 @@ use std::ffi::CStr;
 
 use nss_rs::{
     AuthenticationStatus, Client, Error, HandshakeState, Res, SecretAgentPreInfo, Server,
-    TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
-    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
-    cert::CertificateCompressor, generate_ech_keys,
+    TLS_AES_128_GCM_SHA256, TLS_ALERT_ECH_REQUIRED, TLS_CHACHA20_POLY1305_SHA256,
+    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3,
+    ZeroRttCheckResult, ZeroRttChecker, cert::CertificateCompressor, generate_ech_keys,
 };
 
 mod handshake;
@@ -580,7 +580,7 @@ fn ech_retry() {
     );
     // We don't forward alerts, so we can't tell the server about them.
     // An ech_required alert should be set though.
-    assert_eq!(client.alert(), Some(121));
+    assert_eq!(client.alert(), Some(TLS_ALERT_ECH_REQUIRED));
 
     let mut server = Server::new(&["key"]).unwrap();
     server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();
