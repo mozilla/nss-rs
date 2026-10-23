@@ -9,7 +9,11 @@ use std::{cell::RefCell, rc::Rc};
 use handshake::forward_records;
 use nss_rs::{
     AuthenticationStatus, Client, Error, HandshakeState, Server,
-    constants::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
+    constants::{
+        HandshakeMessage, TLS_ALERT_DECODE_ERROR, TLS_ALERT_ECH_REQUIRED,
+        TLS_ALERT_ILLEGAL_PARAMETER, TLS_ALERT_UNSUPPORTED_EXTENSION, TLS_HS_CLIENT_HELLO,
+        TLS_HS_ENCRYPTED_EXTENSIONS,
+    },
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter, ExtensionWriterResult},
     generate_ech_keys,
 };
@@ -75,14 +79,14 @@ impl ExtensionHandler for SimpleExtensionHandler {
             TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS => {
                 self.handled = true;
                 if d.len() != 1 {
-                    ExtensionHandlerResult::Alert(50) // decode_error
+                    ExtensionHandlerResult::Alert(TLS_ALERT_DECODE_ERROR)
                 } else if d[0] == 77 {
                     ExtensionHandlerResult::Ok
                 } else {
-                    ExtensionHandlerResult::Alert(47) // illegal_parameter
+                    ExtensionHandlerResult::Alert(TLS_ALERT_ILLEGAL_PARAMETER)
                 }
             }
-            _ => ExtensionHandlerResult::Alert(110), // unsupported_extension
+            _ => ExtensionHandlerResult::Alert(TLS_ALERT_UNSUPPORTED_EXTENSION),
         }
     }
 }
@@ -166,10 +170,10 @@ impl ExtensionHandler for EchExtensionHandler {
                 if d == expected {
                     ExtensionHandlerResult::Ok
                 } else {
-                    ExtensionHandlerResult::Alert(47) // illegal_parameter
+                    ExtensionHandlerResult::Alert(TLS_ALERT_ILLEGAL_PARAMETER)
                 }
             }
-            _ => ExtensionHandlerResult::Alert(110), // unsupported_extension
+            _ => ExtensionHandlerResult::Alert(TLS_ALERT_UNSUPPORTED_EXTENSION),
         }
     }
 }
@@ -257,7 +261,7 @@ fn ech_retry() {
         panic!("no ECH retry configuration provided");
     };
     assert_eq!(server.ech_config(), retry_cfg);
-    assert_eq!(client.alert(), Some(121));
+    assert_eq!(client.alert(), Some(TLS_ALERT_ECH_REQUIRED));
 
     // Note that we don't have a means of signaling the error to the server in this code.
 }
