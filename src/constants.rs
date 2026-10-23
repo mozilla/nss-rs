@@ -14,6 +14,36 @@ use crate::{Error, ssl};
 
 pub type Alert = u8;
 
+// RFC 8446, Section 6.
+pub const TLS_ALERT_CLOSE_NOTIFY: Alert = 0;
+pub const TLS_ALERT_UNEXPECTED_MESSAGE: Alert = 10;
+pub const TLS_ALERT_BAD_RECORD_MAC: Alert = 20;
+pub const TLS_ALERT_RECORD_OVERFLOW: Alert = 22;
+pub const TLS_ALERT_HANDSHAKE_FAILURE: Alert = 40;
+pub const TLS_ALERT_BAD_CERTIFICATE: Alert = 42;
+pub const TLS_ALERT_UNSUPPORTED_CERTIFICATE: Alert = 43;
+pub const TLS_ALERT_CERTIFICATE_REVOKED: Alert = 44;
+pub const TLS_ALERT_CERTIFICATE_EXPIRED: Alert = 45;
+pub const TLS_ALERT_CERTIFICATE_UNKNOWN: Alert = 46;
+pub const TLS_ALERT_ILLEGAL_PARAMETER: Alert = 47;
+pub const TLS_ALERT_UNKNOWN_CA: Alert = 48;
+pub const TLS_ALERT_ACCESS_DENIED: Alert = 49;
+pub const TLS_ALERT_DECODE_ERROR: Alert = 50;
+pub const TLS_ALERT_DECRYPT_ERROR: Alert = 51;
+pub const TLS_ALERT_PROTOCOL_VERSION: Alert = 70;
+pub const TLS_ALERT_INSUFFICIENT_SECURITY: Alert = 71;
+pub const TLS_ALERT_INTERNAL_ERROR: Alert = 80;
+pub const TLS_ALERT_INAPPROPRIATE_FALLBACK: Alert = 86;
+pub const TLS_ALERT_USER_CANCELED: Alert = 90;
+pub const TLS_ALERT_MISSING_EXTENSION: Alert = 109;
+pub const TLS_ALERT_UNSUPPORTED_EXTENSION: Alert = 110;
+pub const TLS_ALERT_UNRECOGNIZED_NAME: Alert = 112;
+pub const TLS_ALERT_BAD_CERTIFICATE_STATUS_RESPONSE: Alert = 113;
+pub const TLS_ALERT_UNKNOWN_PSK_IDENTITY: Alert = 115;
+pub const TLS_ALERT_CERTIFICATE_REQUIRED: Alert = 116;
+pub const TLS_ALERT_NO_APPLICATION_PROTOCOL: Alert = 120;
+pub const TLS_ALERT_ECH_REQUIRED: Alert = 121; // RFC 9849
+
 #[derive(Default, Debug, Enum, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr)]
 #[repr(u16)]
 pub enum Epoch {
