@@ -141,6 +141,7 @@ fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
 pub struct SecretAgentPreInfo {
     info: ssl::SSLPreliminaryChannelInfo,
     alpn: Option<String>,
+    ech_public_name: Option<String>,
 }
 
 macro_rules! preinfo_arg {
@@ -170,9 +171,23 @@ impl SecretAgentPreInfo {
             )
         })?;
 
+        let info = unsafe { info.assume_init() };
+        // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
+        // that NSS frees on reset/close, not at anything this struct owns.
+        // Copy it now, while the socket is alive, so that this struct never
+        // dereferences that pointer after NSS has freed it.
+        let ech_public_name =
+            if info.valuesSet & ssl::ssl_preinfo_ech == 0 || info.echPublicName.is_null() {
+                None
+            } else {
+                let n = unsafe { CStr::from_ptr(info.echPublicName) };
+                Some(n.to_str()?.to_owned())
+            };
+
         Ok(Self {
-            info: unsafe { info.assume_init() },
+            info,
             alpn: get_alpn(fd, true)?,
+            ech_public_name,
         })
     }
 
@@ -217,17 +232,11 @@ impl SecretAgentPreInfo {
     ///
     /// # Errors
     ///
-    /// When the public name is not valid UTF-8.  (Note: names should be ASCII.)
+    /// None.  The name is validated when the `SecretAgentPreInfo` is created;
+    /// the `Res` is kept so that existing callers don't change.
+    #[expect(clippy::unnecessary_wraps, reason = "API compatibility")]
     pub fn ech_public_name(&self) -> Res<Option<String>> {
-        if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 || self.info.echPublicName.is_null() {
-            Ok(None)
-        } else {
-            // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
-            // that NSS frees on reset/close, not at anything this struct owns, so
-            // hand back an owned copy rather than a borrow tied to `&self`.
-            let n = unsafe { CStr::from_ptr(self.info.echPublicName) };
-            Ok(Some(n.to_str()?.to_owned()))
-        }
+        Ok(self.ech_public_name.clone())
     }
 
     #[must_use]
@@ -675,7 +684,8 @@ impl SecretAgent {
     ///
     /// # Errors
     ///
-    /// When the underlying socket functions fail.
+    /// When the underlying socket functions fail, or when the ECH public name
+    /// is not valid UTF-8.  (Note: names should be ASCII.)
     pub fn preinfo(&self) -> Res<SecretAgentPreInfo> {
         SecretAgentPreInfo::new(self.fd)
     }
