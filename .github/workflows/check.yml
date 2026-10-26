@@ -237,7 +237,7 @@ jobs:
             install: pacman -Syu --noconfirm git nss clang pkgconf gcc curl
           - name: Alpine
             # renovate: depName=alpine datasource=docker
-            container: alpine:latest@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
+            container: alpine:latest@sha256:c26612752c78b18faacd63c7d50f4592c2e7b0f25e0e20e82bd74e465c57ab0d
             install: apk add --no-cache git nss-dev clang-dev pkgconf gcc musl-dev curl
             # rustup binaries are statically linked, which prevents bindgen from dlopen-ing libclang.
             # Disabling -crt-static makes them dynamically linked.
