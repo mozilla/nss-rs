@@ -48,7 +48,7 @@ use crate::{
     time::{Time, TimeHolder},
 };
 
-/// The maximum number of tickets to remember for a given connection.
+/// The maximum number of tickets to keep from earlier inputs.
 const MAX_TICKETS: usize = 4;
 
 #[must_use]
@@ -326,6 +326,10 @@ pub struct SecretAgent {
     /// The encrypted client hello (ECH) configuration that is in use.
     /// Empty if ECH is not enabled.
     ech_config: Vec<u8>,
+
+    /// Records the resumption tokens a client has received.
+    #[expect(clippy::box_collection, reason = "We need the Box.")]
+    resumption: Pin<Box<Vec<ResumptionToken>>>,
 }
 
 impl SecretAgent {
@@ -346,6 +350,8 @@ impl SecretAgent {
             extension_handlers: Vec::new(),
 
             ech_config: Vec::new(),
+
+            resumption: Box::pin(Vec::new()),
         })
     }
 
@@ -767,6 +773,12 @@ impl SecretAgent {
         Ok(())
     }
 
+    /// Drop the oldest resumption tokens beyond `MAX_TICKETS` before new input can add more.
+    fn trim_resumption_tokens(&mut self) {
+        let excess = self.resumption.len().saturating_sub(MAX_TICKETS);
+        self.resumption.drain(..excess);
+    }
+
     /// Drive the TLS handshake, taking bytes from `input` and putting
     /// any bytes necessary into `output`.
     /// This takes the current time as `now`.
@@ -779,6 +791,7 @@ impl SecretAgent {
     ///
     /// When the handshake fails this returns an error.
     pub fn handshake(&mut self, now: Instant, input: &[u8]) -> Res<Vec<u8>> {
+        self.trim_resumption_tokens();
         self.now.set(now)?;
         self.set_raw(false)?;
 
@@ -826,6 +839,7 @@ impl SecretAgent {
     ///
     /// When the handshake fails this returns an error.
     pub fn handshake_raw(&mut self, now: Instant, input: Option<Record>) -> Res<RecordList> {
+        self.trim_resumption_tokens();
         self.now.set(now)?;
         let records = self.setup_raw()?;
 
@@ -927,6 +941,7 @@ pub struct ResumptionToken {
     #[as_ref([u8])]
     token: Vec<u8>,
     expiration_time: Instant,
+    max_early_data_size: u32,
 }
 
 impl Debug for ResumptionToken {
@@ -934,6 +949,7 @@ impl Debug for ResumptionToken {
         f.debug_struct("ResumptionToken")
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
+            .field("max_early_data_size", &self.max_early_data_size)
             .finish()
     }
 }
@@ -941,15 +957,31 @@ impl Debug for ResumptionToken {
 impl ResumptionToken {
     #[must_use]
     pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
+        Self::new_with_early_data(token, expiration_time, 0)
+    }
+
+    #[must_use]
+    pub const fn new_with_early_data(
+        token: Vec<u8>,
+        expiration_time: Instant,
+        max_early_data_size: u32,
+    ) -> Self {
         Self {
             token,
             expiration_time,
+            max_early_data_size,
         }
     }
 
     #[must_use]
     pub const fn expiration_time(&self) -> Instant {
         self.expiration_time
+    }
+
+    /// The `max_early_data_size` of the session ticket, or 0 if it does not allow early data.
+    #[must_use]
+    pub const fn max_early_data_size(&self) -> u32 {
+        self.max_early_data_size
     }
 }
 
@@ -962,9 +994,6 @@ pub struct Client {
 
     /// The name of the server we're attempting a connection to.
     server_name: String,
-    /// Records the resumption tokens we've received.
-    #[expect(clippy::box_collection, reason = "We need the Box.")]
-    resumption: Pin<Box<Vec<ResumptionToken>>>,
 }
 
 impl Client {
@@ -979,11 +1008,7 @@ impl Client {
         let url = CString::new(server_name.as_bytes())?;
         secstatus_to_res(unsafe { ssl::SSL_SetURL(agent.fd, url.as_ptr()) })?;
         agent.ready(false, grease)?;
-        let mut client = Self {
-            agent,
-            server_name,
-            resumption: Box::pin(Vec::new()),
-        };
+        let mut client = Self { agent, server_name };
         client.ready()?;
         Ok(client)
     }
@@ -1005,6 +1030,7 @@ impl Client {
             return ssl::SECSuccess;
         }
         let expiration_time = unsafe { info.assume_init_ref() }.expirationTime;
+        let max_early_data_size = unsafe { info.assume_init_ref() }.maxEarlyDataSize;
         if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -1019,11 +1045,12 @@ impl Client {
         v.extend_from_slice(unsafe { null_safe_slice(token, len) });
         debug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
 
-        if resumption.len() >= MAX_TICKETS {
-            resumption.remove(0);
-        }
         if let Ok(t) = Time::try_from(expiration_time) {
-            resumption.push(ResumptionToken::new(v, *t));
+            resumption.push(ResumptionToken::new_with_early_data(
+                v,
+                *t,
+                max_early_data_size,
+            ));
         }
         ssl::SECSuccess
     }
@@ -1048,6 +1075,12 @@ impl Client {
     #[must_use]
     pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         (*self.resumption).pop()
+    }
+
+    /// The resumption tokens received and not yet taken, oldest first.
+    #[must_use]
+    pub fn resumption_tokens(&self) -> &[ResumptionToken] {
+        &self.resumption
     }
 
     /// Check if there are more resumption tokens.
@@ -1449,7 +1482,7 @@ mod tests {
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
-            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?} }}"
+            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }

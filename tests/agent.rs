@@ -1,19 +1,98 @@
 use std::ffi::CStr;
 
 use nss_rs::{
-    AuthenticationStatus, Client, Error, HandshakeState, Res, SecretAgentPreInfo, Server,
-    TLS_AES_128_GCM_SHA256, TLS_ALERT_ECH_REQUIRED, TLS_CHACHA20_POLY1305_SHA256,
-    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3,
-    ZeroRttCheckResult, ZeroRttChecker, cert::CertificateCompressor, generate_ech_keys,
+    AntiReplay, AuthenticationStatus, Client, Error, HandshakeState, Record, Res, ResumptionToken,
+    SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256, TLS_ALERT_ECH_REQUIRED,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
+    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
+    cert::CertificateCompressor, generate_ech_keys,
 };
 
 mod handshake;
-use test_fixture::{damage_ech_config, fixture_init, now};
+use test_fixture::{anti_replay, damage_ech_config, fixture_init, now};
 
-use crate::handshake::{
-    PermissiveZeroRttChecker, Resumption, ZERO_RTT_TOKEN_DATA, connect, connect_fail,
-    forward_records, resumption_setup,
-};
+use crate::handshake::{connect, connect_fail, forward_records};
+
+#[derive(Clone, Copy, Debug)]
+enum Resumption {
+    WithoutZeroRtt,
+    WithZeroRtt(u16),
+}
+
+const ZERO_RTT_TOKEN_DATA: &[u8] = b"zero-rtt-token";
+
+#[derive(Debug)]
+struct PermissiveZeroRttChecker {
+    resuming: bool,
+}
+
+impl Default for PermissiveZeroRttChecker {
+    fn default() -> Self {
+        Self { resuming: true }
+    }
+}
+
+impl ZeroRttChecker for PermissiveZeroRttChecker {
+    fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
+        if self.resuming {
+            assert_eq!(ZERO_RTT_TOKEN_DATA, token);
+        } else {
+            assert!(token.is_empty());
+        }
+        ZeroRttCheckResult::Accept
+    }
+}
+
+fn zero_rtt_setup(mode: Resumption, client: &Client, server: &mut Server) -> Option<AntiReplay> {
+    let Resumption::WithZeroRtt(max_early_data) = mode else {
+        return None;
+    };
+    client.enable_0rtt().expect("should enable 0-RTT on client");
+
+    let anti_replay = anti_replay();
+    server
+        .enable_0rtt(
+            &anti_replay,
+            u32::from(max_early_data),
+            Box::new(PermissiveZeroRttChecker { resuming: false }),
+        )
+        .expect("should enable 0-RTT on server");
+    Some(anti_replay)
+}
+
+#[must_use]
+fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, ResumptionToken) {
+    fixture_init();
+
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    let anti_replay = zero_rtt_setup(mode, &client, &mut server);
+
+    connect(&mut client, &mut server);
+
+    let client_info = client.info().expect("client is connected");
+    let server_info = server.info().expect("server is connected");
+    assert!(!client_info.resumed());
+    assert!(!server_info.resumed());
+    assert!(!client_info.early_data_accepted());
+    assert!(!server_info.early_data_accepted());
+
+    let server_records = server
+        .send_ticket(now(), ZERO_RTT_TOKEN_DATA)
+        .expect("ticket sent");
+    assert_eq!(server_records.len(), 1);
+    let client_records = client
+        .handshake_raw(now(), server_records.into_iter().next())
+        .expect("records ingested");
+    assert_eq!(client_records.len(), 0);
+
+    // `client` is about to go out of scope,
+    // but we only need to keep the resumption token, so clone it.
+    assert_eq!(client.resumption_tokens().len(), 1);
+    let token = client.resumption_token().expect("token is present");
+    assert!(client.resumption_tokens().is_empty());
+    (anti_replay, token)
+}
 
 #[test]
 fn make_client() {
@@ -408,8 +487,47 @@ fn resume() {
 }
 
 #[test]
+fn resumption_token_max_early_data_size() {
+    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
+    assert_eq!(token.max_early_data_size(), 0);
+    let (_, token) = resumption_setup(Resumption::WithZeroRtt(1234));
+    assert_eq!(token.max_early_data_size(), 1234);
+}
+
+#[test]
+fn resumption_tokens_from_one_input() {
+    const TICKETS: usize = 5;
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut client, &mut server);
+
+    let mut send_tickets = |n| -> Record {
+        let records: Vec<_> = (0..n)
+            .flat_map(|_| server.send_ticket(now(), &[]).expect("ticket sent"))
+            .collect();
+        let data: Vec<u8> = records.iter().flat_map(|r| r.data.clone()).collect();
+        Record::new(records[0].epoch, records[0].ct, &data)
+    };
+
+    // All tickets from one input are available before the next input.
+    let input = send_tickets(TICKETS);
+    client
+        .handshake_raw(now(), Some(input))
+        .expect("records ingested");
+    assert_eq!(client.resumption_tokens().len(), TICKETS);
+
+    // The next input evicts the oldest tickets beyond the limit first.
+    let input = send_tickets(1);
+    client
+        .handshake_raw(now(), Some(input))
+        .expect("records ingested");
+    assert_eq!(client.resumption_tokens().len(), TICKETS);
+}
+
+#[test]
 fn zero_rtt() {
-    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt(u16::MAX));
 
     // Finally, 0-RTT should succeed.
     let mut client = Client::new("server.example", true).expect("should create client");
@@ -433,7 +551,7 @@ fn zero_rtt() {
 
 #[test]
 fn zero_rtt_no_eoed() {
-    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt(u16::MAX));
 
     // Finally, 0-RTT should succeed.
     let mut client = Client::new("server.example", true).expect("should create client");
@@ -472,7 +590,7 @@ impl ZeroRttChecker for RejectZeroRtt {
 
 #[test]
 fn reject_zero_rtt() {
-    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt(u16::MAX));
 
     // Finally, 0-RTT should succeed.
     let mut client = Client::new("server.example", true).expect("should create client");
