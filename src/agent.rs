@@ -141,6 +141,8 @@ fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
 pub struct SecretAgentPreInfo {
     info: ssl::SSLPreliminaryChannelInfo,
     alpn: Option<String>,
+    /// Copied: `info.echPublicName` points at NSS socket memory freed on reset/close.
+    ech_public_name: Option<CString>,
 }
 
 macro_rules! preinfo_arg {
@@ -170,9 +172,15 @@ impl SecretAgentPreInfo {
             )
         })?;
 
+        let info = unsafe { info.assume_init() };
+        let ech_public_name = (info.valuesSet & ssl::ssl_preinfo_ech != 0)
+            .then_some(info.echPublicName)
+            .filter(|p| !p.is_null())
+            .map(|p| unsafe { CStr::from_ptr(p) }.to_owned());
         Ok(Self {
-            info: unsafe { info.assume_init() },
+            info,
             alpn: get_alpn(fd, true)?,
+            ech_public_name,
         })
     }
 
@@ -218,16 +226,12 @@ impl SecretAgentPreInfo {
     /// # Errors
     ///
     /// When the public name is not valid UTF-8.  (Note: names should be ASCII.)
-    pub fn ech_public_name(&self) -> Res<Option<String>> {
-        if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 || self.info.echPublicName.is_null() {
-            Ok(None)
-        } else {
-            // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
-            // that NSS frees on reset/close, not at anything this struct owns, so
-            // hand back an owned copy rather than a borrow tied to `&self`.
-            let n = unsafe { CStr::from_ptr(self.info.echPublicName) };
-            Ok(Some(n.to_str()?.to_owned()))
-        }
+    pub fn ech_public_name(&self) -> Res<Option<&str>> {
+        Ok(self
+            .ech_public_name
+            .as_deref()
+            .map(CStr::to_str)
+            .transpose()?)
     }
 
     #[must_use]
@@ -759,7 +763,9 @@ impl SecretAgent {
             if *self.auth_required {
                 self.preinfo()?.ech_public_name()?.map_or(
                     HandshakeState::AuthenticationPending,
-                    HandshakeState::EchFallbackAuthenticationPending,
+                    |public_name| {
+                        HandshakeState::EchFallbackAuthenticationPending(public_name.to_owned())
+                    },
                 )
             } else {
                 HandshakeState::InProgress
