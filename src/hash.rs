@@ -46,9 +46,8 @@ pub const fn hash_alg_to_hash_len(alg: &HashAlgorithm) -> usize {
 pub fn hash(alg: &HashAlgorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
     init()?;
 
-    let data_len: i32 = match i32::try_from(data.len()) {
-        Ok(data_len) => data_len,
-        _ => return Err(Error::Internal),
+    let Ok(data_len) = i32::try_from(data.len()) else {
+        return Err(Error::Internal);
     };
     let expected_len = hash_alg_to_hash_len(alg);
     let mut digest = vec![0u8; expected_len];
