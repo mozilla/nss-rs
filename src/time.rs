@@ -112,7 +112,9 @@ impl TryFrom<PRTime> for Time {
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
         let delta = prtime.checked_sub(base.prtime).ok_or(Error::TimeTravel)?;
-        let d = Duration::from_micros(u64::try_from(delta.abs())?);
+        let d = Duration::from_micros(u64::try_from(
+            delta.checked_abs().ok_or(Error::IntegerOverflow)?,
+        )?);
         let t = if delta >= 0 {
             base.instant.checked_add(d)
         } else {
@@ -211,7 +213,7 @@ mod test {
     };
 
     use super::{Interval, PRTime, Time, TimeZero, get_base, init};
-    use crate::err::Res;
+    use crate::err::{Error, Res};
 
     #[test]
     fn convert_stable() {
@@ -248,6 +250,13 @@ mod test {
         let pr: PRTime = t.try_into().expect("convert past time to PRTime");
         let delta_micros = PRTime::try_from(DELTA.as_micros()).unwrap();
         assert_eq!(pr, base.prtime - delta_micros);
+    }
+
+    #[test]
+    fn min_delta_prtime() {
+        init();
+        let t = Time::try_from(PRTime::MIN + get_base().prtime);
+        assert_eq!(t, Err(Error::IntegerOverflow));
     }
 
     #[test]
