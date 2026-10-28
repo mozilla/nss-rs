@@ -93,7 +93,7 @@ impl<'a, T: Sized + 'a> ParamItem<'a, T> {
     }
 
     pub const fn ptr(&mut self) -> *mut SECItem {
-        std::ptr::addr_of_mut!(self.item)
+        &raw mut self.item
     }
 }
 

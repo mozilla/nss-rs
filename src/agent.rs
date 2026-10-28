@@ -364,8 +364,7 @@ impl SecretAgent {
     // ssl::SSL_* APIs only need an opaque type.
     fn create_fd(io: &mut Pin<Box<AgentIo>>) -> Res<*mut prio::PRFileDesc> {
         assert_initialized();
-        let label = CString::new("sslwrapper")?;
-        let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
+        let id = unsafe { prio::PR_GetUniqueIdentity(c"sslwrapper".as_ptr()) };
 
         let base_fd = unsafe { prio::PR_CreateIOLayerStub(id, METHODS) };
         if base_fd.is_null() {
