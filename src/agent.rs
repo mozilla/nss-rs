@@ -138,6 +138,16 @@ fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
     Ok(alpn)
 }
 
+fn get_ech_public_name(info: &ssl::SSLPreliminaryChannelInfo) -> Res<Option<String>> {
+    if info.valuesSet & ssl::ssl_preinfo_ech == 0 || info.echPublicName.is_null() {
+        return Ok(None);
+    }
+    // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
+    // that NSS frees on reset/close, so take a copy while the socket is alive.
+    let n = unsafe { CStr::from_ptr(info.echPublicName) };
+    Ok(Some(n.to_str()?.to_owned()))
+}
+
 pub struct SecretAgentPreInfo {
     info: ssl::SSLPreliminaryChannelInfo,
     alpn: Option<String>,
@@ -172,22 +182,10 @@ impl SecretAgentPreInfo {
         })?;
 
         let info = unsafe { info.assume_init() };
-        // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
-        // that NSS frees on reset/close, not at anything this struct owns.
-        // Copy it now, while the socket is alive, so that this struct never
-        // dereferences that pointer after NSS has freed it.
-        let ech_public_name =
-            if info.valuesSet & ssl::ssl_preinfo_ech == 0 || info.echPublicName.is_null() {
-                None
-            } else {
-                let n = unsafe { CStr::from_ptr(info.echPublicName) };
-                Some(n.to_str()?.to_owned())
-            };
-
         Ok(Self {
+            ech_public_name: get_ech_public_name(&info)?,
             info,
             alpn: get_alpn(fd, true)?,
-            ech_public_name,
         })
     }
 
