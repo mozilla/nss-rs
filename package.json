@@ -2,6 +2,6 @@
   "name": "nss-rs",
   "private": true,
   "dependencies": {
-    "tombi": "1.8.1"
+    "tombi": "1.8.10"
   }
 }
