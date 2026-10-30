@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nss_rs::{AntiReplay, init_db, p11::PK11_IsFIPS};
+use nss_rs::{
+    AntiReplay, Extension, Group, TLS_EXT_KEY_SHARE, TLS_HS_CLIENT_HELLO, init_db, p11::PK11_IsFIPS,
+};
 
 /// The path to the default NSS database used for testing.
 pub const TEST_FIXTURE_DB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
@@ -129,4 +131,61 @@ pub fn damage_ech_config(config: &[u8]) -> Vec<u8> {
     // Change the config_id so that the server doesn't recognize it.
     cfg[6] ^= 0x94;
     cfg
+}
+
+fn u16_at(b: &[u8], i: usize) -> usize {
+    usize::from(u16::from_be_bytes([b[i], b[i + 1]]))
+}
+
+/// The body of extension `ext` in a `ClientHello` message, if present.
+///
+/// # Panics
+/// When `ch` is not a `ClientHello` message.
+#[must_use]
+pub fn client_hello_extension(ch: &[u8], ext: Extension) -> Option<&[u8]> {
+    assert_eq!(ch[0], TLS_HS_CLIENT_HELLO);
+    let mut i = 4 + 2 + 32; // Handshake header, legacy_version, random.
+    i += 1 + usize::from(ch[i]); // legacy_session_id
+    i += 2 + u16_at(ch, i); // cipher_suites
+    i += 1 + usize::from(ch[i]); // legacy_compression_methods
+    let end = i + 2 + u16_at(ch, i);
+    i += 2;
+    while i < end {
+        let len = u16_at(ch, i + 2);
+        if u16_at(ch, i) == usize::from(ext) {
+            return Some(&ch[i + 4..i + 4 + len]);
+        }
+        i += 4 + len;
+    }
+    None
+}
+
+/// The (group, `key_exchange`) entries of the `key_share` extension in a `ClientHello` message.
+fn client_hello_key_shares(ch: &[u8]) -> Vec<(Group, Vec<u8>)> {
+    let ks = client_hello_extension(ch, TLS_EXT_KEY_SHARE).expect("key_share extension");
+    let mut shares = Vec::new();
+    let mut i = 2; // client_shares length
+    while i < ks.len() {
+        let len = u16_at(ks, i + 2);
+        let group = Group::try_from(u16_at(ks, i)).unwrap();
+        shares.push((group, ks[i + 4..i + 4 + len].to_vec()));
+        i += 4 + len;
+    }
+    shares
+}
+
+/// Assert that both `ClientHello` messages offer key shares for exactly `groups`,
+/// and that the second one reuses none of the first one's keys.
+///
+/// # Panics
+/// When the assertion fails.
+pub fn assert_new_key_shares(first_ch: &[u8], second_ch: &[u8], groups: &[Group]) {
+    let first = client_hello_key_shares(first_ch);
+    let second = client_hello_key_shares(second_ch);
+    let share_groups = |s: &[(Group, Vec<u8>)]| s.iter().map(|(g, _)| *g).collect::<Vec<_>>();
+    assert_eq!(share_groups(&first), groups);
+    assert_eq!(share_groups(&second), groups);
+    for (_, key) in &second {
+        assert!(first.iter().all(|(_, k)| k != key));
+    }
 }

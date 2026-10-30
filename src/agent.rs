@@ -334,8 +334,13 @@ pub struct SecretAgent {
 
 impl SecretAgent {
     fn new() -> Res<Self> {
+        Self::new_with_model(null_mut())
+    }
+
+    // Create an agent whose socket copies the configuration of `model`, if not null.
+    fn new_with_model(model: *mut prio::PRFileDesc) -> Res<Self> {
         let mut io = Box::pin(AgentIo::default());
-        let fd = Self::create_fd(&mut io)?;
+        let fd = Self::create_fd(&mut io, model)?;
         Ok(Self {
             fd,
             secrets: SecretHolder::default(),
@@ -362,7 +367,10 @@ impl SecretAgent {
     // minimal, but it means that the two forms need casts to translate
     // between them.  ssl::PRFileDesc is left as an opaque type, as the
     // ssl::SSL_* APIs only need an opaque type.
-    fn create_fd(io: &mut Pin<Box<AgentIo>>) -> Res<*mut prio::PRFileDesc> {
+    fn create_fd(
+        io: &mut Pin<Box<AgentIo>>,
+        model: *mut prio::PRFileDesc,
+    ) -> Res<*mut prio::PRFileDesc> {
         assert_initialized();
         let label = CString::new("sslwrapper")?;
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
@@ -373,7 +381,7 @@ impl SecretAgent {
         }
         let fd = unsafe {
             (*base_fd).secret = as_c_void(io).cast();
-            ssl::SSL_ImportFD(null_mut(), base_fd.cast())
+            ssl::SSL_ImportFD(model.cast(), base_fd.cast())
         };
         if fd.is_null() {
             unsafe {
@@ -418,6 +426,16 @@ impl SecretAgent {
 
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool, grease: bool) -> Res<()> {
+        self.bind_callbacks()?;
+        self.configure(grease)?;
+        self.reset_handshake(is_server)
+    }
+
+    fn reset_handshake(&self, is_server: bool) -> Res<()> {
+        secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, PRBool::from(is_server)) })
+    }
+
+    fn bind_callbacks(&mut self) -> Res<()> {
         secstatus_to_res(unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
@@ -434,9 +452,7 @@ impl SecretAgent {
             )
         })?;
 
-        self.now.bind(self.fd)?;
-        self.configure(grease)?;
-        secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, PRBool::from(is_server)) })
+        self.now.bind(self.fd)
     }
 
     /// Default configuration.
@@ -1008,6 +1024,33 @@ impl Client {
         let url = CString::new(server_name.as_bytes())?;
         secstatus_to_res(unsafe { ssl::SSL_SetURL(agent.fd, url.as_ptr()) })?;
         agent.ready(false, grease)?;
+        Self::with_agent(agent, server_name)
+    }
+
+    /// A new client with this client's configuration and no handshake state.
+    ///
+    /// Extension handlers and resumption tokens are not carried over.
+    ///
+    /// # Errors
+    ///
+    /// Errors returned if the client was closed, or if the socket can't be created or configured.
+    pub fn duplicate(&self) -> Res<Self> {
+        if self.fd.is_null() {
+            return Err(Error::InvalidState);
+        }
+        let mut agent = SecretAgent::new_with_model(self.fd)?;
+        // NSS copied the auth, alert, time and resumption callback args of `self`; rebind them.
+        agent.bind_callbacks()?;
+        agent.reset_handshake(false)?;
+        // The copied extension hooks point at the handlers of `self`.
+        self.extension_handlers
+            .iter()
+            .try_for_each(|tracker| unsafe { tracker.remove_hooks(agent.fd) })?;
+        agent.ech_config.clone_from(&self.ech_config);
+        Self::with_agent(agent, self.server_name.clone())
+    }
+
+    fn with_agent(agent: SecretAgent, server_name: String) -> Res<Self> {
         let mut client = Self { agent, server_name };
         client.ready()?;
         Ok(client)
@@ -1432,11 +1475,40 @@ impl DerefMut for Agent {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::ResumptionToken;
+    use test_fixture::{assert_new_key_shares, fixture_init, now};
+
+    use super::{Client, Record, RecordList};
+    use crate::{
+        ResumptionToken,
+        constants::{Epoch, Group, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519},
+    };
+
+    #[test]
+    fn reset_handshake_after_client_hello_key_shares() {
+        const GROUPS: [Group; 2] = [TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1];
+        let client_hello = |records: RecordList| {
+            let records: Vec<Record> = records.into_iter().collect();
+            let [record] = <[Record; 1]>::try_from(records).unwrap();
+            record.data
+        };
+        fixture_init();
+        crate::init().unwrap();
+        let mut client = Client::new("server.example", false).unwrap();
+        client.set_groups(&GROUPS).unwrap();
+        client.send_additional_key_shares(1).unwrap();
+        let first = client_hello(client.handshake_raw(now(), None).unwrap());
+
+        client.reset_handshake(false).unwrap();
+        // SSL_ForceHandshake doesn't restart a reset handshake, but SSL_RecordLayerData does.
+        // A partial handshake message header is buffered without error.
+        let partial = Record::new(Epoch::Initial, TLS_CT_HANDSHAKE, &[2]);
+        let second = client_hello(client.handshake_raw(now(), Some(partial)).unwrap());
+        assert_new_key_shares(&first, &second, &GROUPS);
+    }
 
     #[test]
     fn resumption_token_debug_impl() {
-        let now = test_fixture::now();
+        let now = now();
         let token = [
             2, 0, 6, 60, 37, 21, 238, 165, 182, 0, 6, 60, 77, 81, 157, 101, 182, 0, 6, 60, 37, 21,
             238, 165, 182, 0, 2, 163, 0, 0, 0, 0, 1, 72, 146, 254, 127, 255, 255, 255, 255, 0, 1,

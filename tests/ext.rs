@@ -8,7 +8,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use handshake::forward_records;
 use nss_rs::{
-    AuthenticationStatus, Client, Error, HandshakeState, Server,
+    AuthenticationStatus, Client, Error, HandshakeState, SecretAgent, Server,
     constants::{
         HandshakeMessage, TLS_ALERT_DECODE_ERROR, TLS_ALERT_ECH_REQUIRED,
         TLS_ALERT_ILLEGAL_PARAMETER, TLS_ALERT_UNSUPPORTED_EXTENSION, TLS_HS_CLIENT_HELLO,
@@ -20,13 +20,10 @@ use nss_rs::{
 use test_fixture::{damage_ech_config, fixture_init, now};
 
 mod handshake;
-use crate::handshake::connect;
+use crate::handshake::{NoopExtensionHandler, connect};
 
 const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";
-
-struct NoopExtensionHandler;
-impl ExtensionHandler for NoopExtensionHandler {}
 
 // This test just handshakes.  It doesn't really do anything about capturing the
 #[test]
@@ -112,6 +109,62 @@ fn simple_extension() {
 
     assert!(client_handler.borrow().negotiated());
     assert!(server_handler.borrow().negotiated());
+}
+
+#[derive(Debug, Default)]
+struct ReceiveOnlyExtensionHandler {
+    handled: bool,
+}
+
+impl ExtensionHandler for ReceiveOnlyExtensionHandler {
+    fn write(
+        &mut self,
+        _msg: HandshakeMessage,
+        _ch_outer: bool,
+        _w: &mut ExtensionWriter<'_>,
+    ) -> ExtensionWriterResult {
+        ExtensionWriterResult::Skip
+    }
+
+    fn handle(&mut self, _msg: HandshakeMessage, _d: &[u8]) -> ExtensionHandlerResult {
+        self.handled = true;
+        ExtensionHandlerResult::Ok
+    }
+}
+
+fn install_handler<H: ExtensionHandler + 'static>(
+    agent: &mut SecretAgent,
+    handler: H,
+) -> Rc<RefCell<H>> {
+    let handler = Rc::new(RefCell::new(handler));
+    agent
+        .extension_handler(0xffff, Rc::<RefCell<H>>::clone(&handler))
+        .expect("handler installed");
+    handler
+}
+
+#[test]
+fn duplicate_drops_extension_handlers() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let client_handler = install_handler(&mut client, SimpleExtensionHandler::default());
+
+    let mut dup = client.duplicate().expect("should duplicate");
+    let dup_handler = install_handler(&mut dup, SimpleExtensionHandler::default());
+    let mut server = Server::new(&["key"]).expect("should create server");
+    let server_handler = install_handler(&mut server, SimpleExtensionHandler::default());
+    connect(&mut dup, &mut server);
+    assert!(dup_handler.borrow().negotiated());
+    assert!(server_handler.borrow().negotiated());
+
+    let mut dup = client.duplicate().expect("should duplicate");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    let server_handler = install_handler(&mut server, ReceiveOnlyExtensionHandler::default());
+    connect(&mut dup, &mut server);
+    assert!(!server_handler.borrow().handled);
+
+    assert!(!client_handler.borrow().written);
+    assert!(!client_handler.borrow().handled);
 }
 
 #[derive(Debug, Default)]

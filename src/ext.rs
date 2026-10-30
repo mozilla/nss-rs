@@ -14,6 +14,7 @@ use std::{
     fmt::{self, Debug, Formatter},
     os::raw::{c_uint, c_void},
     pin::Pin,
+    ptr::null_mut,
     rc::Rc,
 };
 
@@ -261,6 +262,15 @@ impl ExtensionTracker {
             )?;
             Ok(tracker)
         }
+    }
+
+    /// Remove the hooks for this tracker's extension from `fd`.
+    ///
+    /// # Safety
+    ///
+    /// `fd` must be a valid SSL socket.
+    pub(crate) unsafe fn remove_hooks(&self, fd: *mut PRFileDesc) -> Res<()> {
+        unsafe { SSL_InstallExtensionHooks(fd, self.extension, None, null_mut(), None, null_mut()) }
     }
 }
 
