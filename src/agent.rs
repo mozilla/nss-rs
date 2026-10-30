@@ -1033,8 +1033,11 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Errors returned if the socket can't be created or configured.
+    /// Errors returned if the client was closed, or if the socket can't be created or configured.
     pub fn duplicate(&self) -> Res<Self> {
+        if self.fd.is_null() {
+            return Err(Error::InvalidState);
+        }
         let mut agent = SecretAgent::new_with_model(self.fd)?;
         // NSS copied the auth, alert, time and resumption callback args of `self`; rebind them.
         agent.bind_callbacks()?;
