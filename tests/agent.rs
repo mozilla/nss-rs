@@ -1008,6 +1008,78 @@ fn connection_fails_encoder_returned_too_long() {
     connect_fail(&mut client, &mut server);
 }
 
+#[test]
+fn encoder_short_write_does_not_send_heap_contents() {
+    thread_local! {
+        static RECEIVED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    struct CompressionEncoderShortWrite {}
+
+    impl CertificateCompressor for CompressionEncoderShortWrite {
+        const ID: u16 = 0x4;
+        const NAME: &CStr = c"copy";
+
+        const ENABLE_ENCODING: bool = true;
+        // Claims the whole buffer without writing any of it.
+        fn encode(_input: &[u8], output: &mut [u8]) -> Res<usize> {
+            Ok(output.len())
+        }
+
+        fn decode(input: &[u8], _output: &mut [u8]) -> Res<()> {
+            RECEIVED.with_borrow_mut(|r| r.extend_from_slice(input));
+            Err(Error::CertificateDecoding)
+        }
+    }
+
+    struct CopyCompression {}
+
+    impl CertificateCompressor for CopyCompression {
+        const ID: u16 = 0x4;
+        const NAME: &CStr = c"copy";
+        const ENABLE_ENCODING: bool = true;
+
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
+            let len = std::cmp::min(input.len(), output.len());
+            output[..len].copy_from_slice(&input[..len]);
+            Ok(())
+        }
+    }
+
+    fixture_init();
+    // Leave handshake data from an earlier connection on the heap.
+    {
+        let mut client = Client::new("server.example", true).expect("should create client");
+        let mut server = Server::new(&["key"]).expect("should create server");
+        client
+            .set_certificate_compression::<CopyCompression>()
+            .unwrap();
+        server
+            .set_certificate_compression::<CopyCompression>()
+            .unwrap();
+        connect(&mut client, &mut server);
+    }
+
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    server
+        .set_certificate_compression::<CompressionEncoderShortWrite>()
+        .unwrap();
+
+    client
+        .set_certificate_compression::<CompressionEncoderShortWrite>()
+        .unwrap();
+
+    connect_fail(&mut client, &mut server);
+
+    // The bytes the encoder did not write must not carry stale heap memory.
+    RECEIVED.with_borrow(|r| {
+        assert!(!r.is_empty());
+        assert!(r.iter().all(|&b| b == 0));
+    });
+}
+
 fn connected_pair() -> (Client, Server) {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");

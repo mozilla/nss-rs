@@ -223,6 +223,9 @@ impl<T: CertificateCompressor> UnsafeCertCompression for T {
         };
 
         let output_slice = unsafe { slice::from_raw_parts_mut((*output).data, output_len) };
+        // SECITEM_AllocItem doesn't zero the buffer, and NSS sends `encoded_len`
+        // bytes of it whether or not the encoder wrote them.
+        output_slice.fill(0);
 
         let Ok(encoded_len) = T::encode(input_slice, output_slice) else {
             return ssl::SECFailure;
