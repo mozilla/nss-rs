@@ -1,17 +1,27 @@
-use std::ffi::CStr;
+use std::{
+    cell::RefCell,
+    ffi::CStr,
+    rc::Rc,
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 use nss_rs::{
-    AntiReplay, AuthenticationStatus, Client, Error, HandshakeState, Record, Res, ResumptionToken,
-    SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256, TLS_ALERT_ECH_REQUIRED,
-    TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
-    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
-    cert::CertificateCompressor, generate_ech_keys,
+    AntiReplay, AuthenticationStatus, Client, Error, Extension, Group, HandshakeState, Record, Res,
+    ResumptionToken, SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256,
+    TLS_ALERT_CERTIFICATE_REVOKED, TLS_ALERT_ECH_REQUIRED, TLS_ALERT_PROTOCOL_VERSION,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_EXT_SERVER_NAME, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
+    TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_2, TLS_VERSION_1_3, ZeroRttCheckResult,
+    ZeroRttChecker, cert::CertificateCompressor, generate_ech_keys,
 };
 
 mod handshake;
-use test_fixture::{anti_replay, damage_ech_config, fixture_init, now};
+use test_fixture::{
+    anti_replay, assert_new_key_shares, client_hello_extension, damage_ech_config, fixture_init,
+    now,
+};
 
-use crate::handshake::{connect, connect_fail, forward_records};
+use crate::handshake::{NoopExtensionHandler, connect, connect_at, connect_fail, forward_records};
 
 #[derive(Clone, Copy, Debug)]
 enum Resumption {
@@ -329,6 +339,245 @@ fn server_prefers_second_client_share() {
 
     assert_eq!(client.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
     assert_eq!(server.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+}
+
+fn client_hello(client: &mut Client) -> Vec<u8> {
+    let records = client.handshake_raw(now(), None).expect("send CH");
+    let records: Vec<Record> = records.into_iter().collect();
+    let [record] = <[Record; 1]>::try_from(records).unwrap();
+    record.data
+}
+
+#[test]
+fn duplicate_after_client_hello_key_shares() {
+    const GROUPS: [Group; 2] = [TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1];
+    fixture_init();
+    let mut client = Client::new("server.example", false).expect("should create client");
+    client.set_groups(&GROUPS).expect("groups set");
+    client
+        .send_additional_key_shares(1)
+        .expect("should set additional key share count");
+    let first = client_hello(&mut client);
+
+    let mut dup = client.duplicate().expect("should duplicate");
+    assert_new_key_shares(&first, &client_hello(&mut dup), &GROUPS);
+}
+
+static COUNTING_DECODES: AtomicUsize = AtomicUsize::new(0);
+
+struct CountingCompression {}
+
+impl CertificateCompressor for CountingCompression {
+    const ID: u16 = 0x4;
+    const NAME: &CStr = c"counting";
+    const ENABLE_ENCODING: bool = true;
+
+    fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
+        COUNTING_DECODES.fetch_add(1, Ordering::Relaxed);
+        let len = std::cmp::min(input.len(), output.len());
+        output[..len].copy_from_slice(&input[..len]);
+        Ok(())
+    }
+}
+
+#[test]
+fn duplicate_copies_settings() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256])
+        .expect("ciphers set");
+    client
+        .set_groups(&[TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+    client
+        .set_alpn(&["dummy", "alpn"])
+        .expect("should set ALPN");
+    client
+        .set_certificate_compression::<CountingCompression>()
+        .unwrap();
+    let mut dup = client.duplicate().expect("should duplicate");
+    drop(client);
+
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_alpn(&["alpn", "other"])
+        .expect("should set ALPN");
+    server
+        .set_certificate_compression::<CountingCompression>()
+        .unwrap();
+    connect(&mut dup, &mut server);
+
+    let info = dup.info().unwrap();
+    assert_eq!(info.cipher_suite(), TLS_CHACHA20_POLY1305_SHA256);
+    assert_eq!(info.key_exchange(), TLS_GRP_EC_SECP256R1);
+    assert_eq!(info.alpn(), Some("alpn"));
+    assert_eq!(COUNTING_DECODES.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn duplicate_copies_version_range() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .set_version_range(TLS_VERSION_1_2, TLS_VERSION_1_2)
+        .unwrap();
+    let mut dup = client.duplicate().expect("should duplicate");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    let bytes = dup.handshake(now(), &[]).expect("send CH");
+    assert!(server.handshake(now(), &bytes).is_err());
+    assert_eq!(server.alert(), Some(TLS_ALERT_PROTOCOL_VERSION));
+}
+
+#[test]
+fn duplicate_copies_zero_rtt_settings() {
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt(u16::MAX));
+
+    let client = Client::new("server.example", true).expect("should create client");
+    client.enable_0rtt().expect("should enable 0-RTT");
+    client
+        .disable_end_of_early_data()
+        .expect("should disable EOED");
+    let mut dup = client.duplicate().expect("should duplicate");
+    drop(client);
+    assert!(!dup.has_resumption_token());
+    dup.enable_resumption(token).expect("should accept token");
+
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .enable_0rtt(
+            anti_replay.as_ref().unwrap(),
+            0xffff_ffff,
+            Box::<PermissiveZeroRttChecker>::default(),
+        )
+        .expect("should enable 0-RTT");
+    server
+        .disable_end_of_early_data()
+        .expect("should disable EOED");
+
+    connect(&mut dup, &mut server);
+    assert!(dup.info().unwrap().early_data_accepted());
+    assert!(server.info().unwrap().early_data_accepted());
+}
+
+#[test]
+fn duplicate_keeps_ech() {
+    fixture_init();
+    let mut server = Server::new(&["key"]).expect("should create server");
+    let (sk, pk) = generate_ech_keys().expect("ECH keys");
+    server
+        .enable_ech(88, "public.example", &sk, &pk)
+        .expect("should enable server ECH");
+
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .enable_ech(server.ech_config())
+        .expect("should enable client ECH");
+    let mut dup = client.duplicate().expect("should duplicate");
+    drop(client);
+    assert_eq!(dup.ech_config(), server.ech_config());
+
+    connect(&mut dup, &mut server);
+    assert!(dup.info().unwrap().ech_accepted());
+    assert!(server.info().unwrap().ech_accepted());
+}
+
+#[test]
+fn duplicate_keeps_grease_ech() {
+    const TLS_EXT_ECH: Extension = 0xfe0d; // RFC 9849
+    let sends_ech = |client: &Client| {
+        let mut dup = client.duplicate().expect("should duplicate");
+        assert!(dup.ech_config().is_empty());
+        client_hello_extension(&client_hello(&mut dup), TLS_EXT_ECH).is_some()
+    };
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    assert!(!sends_ech(&client));
+    client.enable_ech([]).expect("should enable ECH greasing");
+    assert!(sends_ech(&client));
+}
+
+#[test]
+fn duplicate_binds_auth_and_alert() {
+    fixture_init();
+    let client = Client::new("server.example", true).expect("should create client");
+    let mut dup = client.duplicate().expect("should duplicate");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    let bytes = dup.handshake(now(), &[]).expect("send CH");
+    let bytes = server
+        .handshake(now(), &bytes[..])
+        .expect("read CH, send SH");
+    let bytes = dup.handshake(now(), &bytes[..]).expect("send CF");
+    assert!(bytes.is_empty());
+    assert_eq!(*dup.state(), HandshakeState::AuthenticationPending);
+    assert_eq!(*client.state(), HandshakeState::New);
+
+    dup.authenticated(AuthenticationStatus::CertRevoked);
+    assert!(dup.handshake(now(), &[]).is_err());
+    assert_eq!(dup.alert(), Some(TLS_ALERT_CERTIFICATE_REVOKED));
+    assert_eq!(client.alert(), None);
+}
+
+/// Connect `client` at `t`, then return the expiration time of the ticket the server sends.
+fn ticket_expiration(client: &mut Client, t: Instant) -> Instant {
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect_at(t, client, &mut server);
+    let records = server.send_ticket(t, &[]).expect("ticket sent");
+    let record = records.into_iter().next();
+    let records = client.handshake_raw(t, record).expect("records ingested");
+    assert!(records.is_empty());
+    assert_eq!(client.resumption_tokens().len(), 1);
+    client.resumption_token().unwrap().expiration_time()
+}
+
+#[test]
+fn duplicate_binds_resumption_and_time() {
+    fixture_init();
+    let client = Client::new("server.example", true).expect("should create client");
+    let mut dup = client.duplicate().expect("should duplicate");
+    let t = now();
+    let expiration = ticket_expiration(&mut dup, t);
+    assert!(client.resumption_tokens().is_empty());
+
+    let mut reference = Client::new("server.example", true).expect("should create client");
+    assert_eq!(expiration, ticket_expiration(&mut reference, t));
+}
+
+#[test]
+fn duplicate_drop_order() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .extension_handler(0xffff, Rc::new(RefCell::new(NoopExtensionHandler)))
+        .expect("installed");
+    let mut dup = client.duplicate().expect("should duplicate");
+    drop(client);
+    ticket_expiration(&mut dup, now());
+
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let dup = client.duplicate().expect("should duplicate");
+    drop(dup);
+    ticket_expiration(&mut client, now());
+}
+
+#[test]
+fn duplicate_server_name() {
+    const SERVER_NAME: &str = "server.example";
+    fixture_init();
+    let client = Client::new(SERVER_NAME, true).expect("should create client");
+    let mut dup = client.duplicate().expect("should duplicate");
+    assert_eq!(dup.server_name(), SERVER_NAME);
+
+    let ch = client_hello(&mut dup);
+    let sni = client_hello_extension(&ch, TLS_EXT_SERVER_NAME).expect("server_name extension");
+    let len = u16::try_from(SERVER_NAME.len()).unwrap();
+    let mut expected = (len + 3).to_be_bytes().to_vec(); // ServerNameList (RFC 6066)
+    expected.push(0); // host_name
+    expected.extend_from_slice(&len.to_be_bytes());
+    expected.extend_from_slice(SERVER_NAME.as_bytes());
+    assert_eq!(sni, expected);
 }
 
 #[test]

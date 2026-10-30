@@ -1432,11 +1432,40 @@ impl DerefMut for Agent {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::ResumptionToken;
+    use test_fixture::{assert_new_key_shares, fixture_init, now};
+
+    use super::{Client, Record, RecordList};
+    use crate::{
+        ResumptionToken,
+        constants::{Epoch, Group, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519},
+    };
+
+    #[test]
+    fn reset_handshake_after_client_hello_key_shares() {
+        const GROUPS: [Group; 2] = [TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1];
+        let client_hello = |records: RecordList| {
+            let records: Vec<Record> = records.into_iter().collect();
+            let [record] = <[Record; 1]>::try_from(records).unwrap();
+            record.data
+        };
+        fixture_init();
+        crate::init().unwrap();
+        let mut client = Client::new("server.example", false).unwrap();
+        client.set_groups(&GROUPS).unwrap();
+        client.send_additional_key_shares(1).unwrap();
+        let first = client_hello(client.handshake_raw(now(), None).unwrap());
+
+        client.reset_handshake(false).unwrap();
+        // SSL_ForceHandshake doesn't restart a reset handshake, but SSL_RecordLayerData does.
+        // A partial handshake message header is buffered without error.
+        let partial = Record::new(Epoch::Initial, TLS_CT_HANDSHAKE, &[2]);
+        let second = client_hello(client.handshake_raw(now(), Some(partial)).unwrap());
+        assert_new_key_shares(&first, &second, &GROUPS);
+    }
 
     #[test]
     fn resumption_token_debug_impl() {
-        let now = test_fixture::now();
+        let now = now();
         let token = [
             2, 0, 6, 60, 37, 21, 238, 165, 182, 0, 6, 60, 77, 81, 157, 101, 182, 0, 6, 60, 37, 21,
             238, 165, 182, 0, 2, 163, 0, 0, 0, 0, 1, 72, 146, 254, 127, 255, 255, 255, 255, 0, 1,
