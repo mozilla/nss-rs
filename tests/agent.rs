@@ -560,6 +560,8 @@ fn duplicate_drop_order() {
     let dup = client.duplicate().expect("should duplicate");
     drop(dup);
     ticket_expiration(&mut client, now());
+    client.close();
+    assert_eq!(client.duplicate().unwrap_err(), Error::InvalidState);
 }
 
 #[test]
