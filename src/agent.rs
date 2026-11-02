@@ -801,15 +801,20 @@ impl SecretAgent {
             match self.state {
                 HandshakeState::Authenticated(err) => {
                     let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, err) };
-                    // SSL_AuthCertificateComplete reports SECSuccess even when
-                    // `err` rejects the certificate, so its result cannot stand
-                    // in for handshake progress. When the certificate was
-                    // rejected, force the handshake so the failure surfaces
-                    // instead of a bogus completion.
-                    if err == 0 {
-                        rv
-                    } else {
+                    // SSL_AuthCertificateComplete reports SECSuccess when `err`
+                    // rejects the certificate, and when the certificate is
+                    // accepted before the server's CertificateVerify and
+                    // Finished arrive, so its result cannot stand in for
+                    // handshake progress. NSS leaves the channel info zeroed
+                    // until the handshake finishes. Until then, force the
+                    // handshake so that a failure surfaces and any input is
+                    // read, instead of a bogus completion.
+                    if rv == ssl::SECSuccess
+                        && SecretAgentInfo::new(self.fd).is_ok_and(|info| info.version() == 0)
+                    {
                         unsafe { ssl::SSL_ForceHandshake(self.fd) }
+                    } else {
+                        rv
                     }
                 }
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
