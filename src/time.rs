@@ -211,7 +211,7 @@ mod test {
     };
 
     use super::{Interval, PRTime, Time, TimeZero, get_base, init};
-    use crate::err::{Error, Res};
+    use crate::err::Res;
 
     #[test]
     fn convert_stable() {
@@ -253,8 +253,15 @@ mod test {
     #[test]
     fn min_delta_prtime() {
         init();
-        let t = Time::try_from(PRTime::MIN + get_base().prtime);
-        assert_eq!(t, Err(Error::IntegerOverflow));
+        let base = get_base();
+        let t = Time::try_from(PRTime::MIN + base.prtime);
+        #[cfg(windows)]
+        assert_eq!(t, Err(crate::err::Error::TimeTravel));
+        #[cfg(not(windows))]
+        {
+            let d = Duration::from_micros(PRTime::MIN.unsigned_abs());
+            assert_eq!(t, Ok(Time::from(base.instant.checked_sub(d).unwrap())));
+        }
     }
 
     #[test]
