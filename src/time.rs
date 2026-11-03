@@ -112,9 +112,7 @@ impl TryFrom<PRTime> for Time {
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
         let delta = prtime.checked_sub(base.prtime).ok_or(Error::TimeTravel)?;
-        let d = Duration::from_micros(u64::try_from(
-            delta.checked_abs().ok_or(Error::IntegerOverflow)?,
-        )?);
+        let d = Duration::from_micros(delta.unsigned_abs());
         let t = if delta >= 0 {
             base.instant.checked_add(d)
         } else {
