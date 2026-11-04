@@ -942,8 +942,14 @@ pub struct ResumptionToken {
     token: Vec<u8>,
     expiration_time: Instant,
     max_early_data_size: u32,
-    plaintext_secret: bool,
 }
+
+/// The resumption token format version that has a feature bitfield in its second byte.
+/// Mirrors `SSLResumptionTokenVersion` in NSS's `lib/ssl/sslimpl.h`.
+const RESUMPTION_TOKEN_VERSION: u8 = 3;
+/// The feature bit marking a token that carries the resumption secret in cleartext.
+/// Mirrors `SSLResumptionTokenFeatureRawMS` in NSS's `lib/ssl/sslimpl.h`.
+const RESUMPTION_TOKEN_FEATURE_RAW_MS: u8 = 0x01;
 
 impl Debug for ResumptionToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -951,7 +957,7 @@ impl Debug for ResumptionToken {
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
-            .field("plaintext_secret", &self.plaintext_secret)
+            .field("plaintext_secret", &self.plaintext_secret())
             .finish()
     }
 }
@@ -972,7 +978,6 @@ impl ResumptionToken {
             token,
             expiration_time,
             max_early_data_size,
-            plaintext_secret: false,
         }
     }
 
@@ -991,11 +996,15 @@ impl ResumptionToken {
     /// the caller is responsible for keeping it confidential.
     /// See [`Client::enable_plaintext_resumption_export`].
     ///
-    /// Only tokens received from a [`Client`] report this; tokens built with
-    /// [`ResumptionToken::new`] or [`ResumptionToken::new_with_early_data`] report `false`.
+    /// Tokens without a plaintext secret are only usable in the process that
+    /// received them and should not be persisted.
     #[must_use]
-    pub const fn plaintext_secret(&self) -> bool {
-        self.plaintext_secret
+    pub fn plaintext_secret(&self) -> bool {
+        matches!(
+            self.token.as_slice(),
+            [RESUMPTION_TOKEN_VERSION, features, ..]
+                if features & RESUMPTION_TOKEN_FEATURE_RAW_MS != 0
+        )
     }
 }
 
@@ -1045,7 +1054,6 @@ impl Client {
         }
         let expiration_time = unsafe { info.assume_init_ref() }.expirationTime;
         let max_early_data_size = unsafe { info.assume_init_ref() }.maxEarlyDataSize;
-        let plaintext_secret = unsafe { info.assume_init_ref() }.plaintextSecret != 0;
         if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -1061,10 +1069,11 @@ impl Client {
         debug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
 
         if let Ok(t) = Time::try_from(expiration_time) {
-            resumption.push(ResumptionToken {
-                plaintext_secret,
-                ..ResumptionToken::new_with_early_data(v, *t, max_early_data_size)
-            });
+            resumption.push(ResumptionToken::new_with_early_data(
+                v,
+                *t,
+                max_early_data_size,
+            ));
         }
         ssl::SECSuccess
     }
