@@ -11,7 +11,7 @@ use std::{
 
 use super::{
     AeadAlgorithms, COUNTER_LEN, Mode, NONCE_LEN, RecordProtectionOps, TAG_LEN, c_int_len,
-    expand_label, expand_label_buf, split_tag, xor_nonce,
+    expand_label, expand_label_buf, split_tag, split_tag_mut, xor_nonce,
 };
 use crate::{
     Cipher, Error, Res, SECItemBorrowed, SymKey, Version,
@@ -196,10 +196,11 @@ impl RecordProtectionOps for RecordProtection {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        let (ct_len, mut tag) = split_tag(input)?;
-        if output.len() < ct_len {
+        let (ct, tag) = split_tag(input)?;
+        if output.len() < ct.len() {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
+        let mut tag = *tag;
         let out_len = unsafe {
             aead_op(
                 &self.ctx,
@@ -207,28 +208,32 @@ impl RecordProtectionOps for RecordProtection {
                 count,
                 aad,
                 output.as_mut_ptr(),
-                output.len(),
+                ct.len(),
                 tag.as_mut_ptr(),
-                input.as_ptr(),
-                ct_len,
+                ct.as_ptr(),
+                ct.len(),
             )
         }?;
+        if out_len != ct.len() {
+            return Err(Error::Internal);
+        }
         Ok(&output[..out_len])
     }
 
     fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
-        let (ct_len, mut tag) = split_tag(data)?;
-        let data_ptr = data.as_mut_ptr();
+        let (ct, tag) = split_tag_mut(data)?;
+        let ct_len = ct.len();
+        let ct_ptr = ct.as_mut_ptr();
         let out_len = unsafe {
             aead_op(
                 &self.ctx,
                 &self.nonce_base,
                 count,
                 aad,
-                data_ptr,
-                data.len(),
+                ct_ptr,
+                ct_len,
                 tag.as_mut_ptr(),
-                data_ptr.cast_const(),
+                ct_ptr.cast_const(),
                 ct_len,
             )
         }?;

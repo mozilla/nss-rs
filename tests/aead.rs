@@ -128,6 +128,13 @@ fn aead_encrypt_in_place_too_small_buffer() {
 }
 
 #[test]
+fn aead_decrypt_in_place_too_small_buffer() {
+    let aead = make_aead(&make_secret(), TLS_AES_128_GCM_SHA256, Mode::Decrypt);
+    let mut small_buffer = vec![0u8; aead.expansion() - 1];
+    assert!(aead.decrypt_in_place(1, AAD, &mut small_buffer).is_err());
+}
+
+#[test]
 fn roundtrip_aes128() {
     common::roundtrip(&make_secret(), TLS_AES_128_GCM_SHA256);
 }
