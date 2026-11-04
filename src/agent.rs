@@ -944,12 +944,20 @@ pub struct ResumptionToken {
     max_early_data_size: u32,
 }
 
+/// The resumption token format version that has a feature bitfield in its second byte.
+/// Mirrors `SSLResumptionTokenVersion` in NSS's `lib/ssl/sslimpl.h`.
+const RESUMPTION_TOKEN_VERSION: u8 = 3;
+/// The feature bit marking a token that carries the resumption secret in cleartext.
+/// Mirrors `SSLResumptionTokenFeatureRawMS` in NSS's `lib/ssl/sslimpl.h`.
+const RESUMPTION_TOKEN_FEATURE_RAW_MS: u8 = 0x01;
+
 impl Debug for ResumptionToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResumptionToken")
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
+            .field("is_plaintext", &self.is_plaintext())
             .finish()
     }
 }
@@ -982,6 +990,21 @@ impl ResumptionToken {
     #[must_use]
     pub const fn max_early_data_size(&self) -> u32 {
         self.max_early_data_size
+    }
+
+    /// Whether the token carries the resumption secret in cleartext, in which case
+    /// the caller is responsible for keeping it confidential.
+    /// See [`Client::enable_plaintext_resumption_export`].
+    ///
+    /// Tokens without a plaintext secret are only usable in the process that
+    /// received them and should not be persisted.
+    #[must_use]
+    pub fn is_plaintext(&self) -> bool {
+        matches!(
+            self.token.as_slice(),
+            [RESUMPTION_TOKEN_VERSION, features, ..]
+                if features & RESUMPTION_TOKEN_FEATURE_RAW_MS != 0
+        )
     }
 }
 
@@ -1058,6 +1081,20 @@ impl Client {
     #[must_use]
     pub fn server_name(&self) -> &str {
         &self.server_name
+    }
+
+    /// Ask for resumption tokens that carry the resumption secret in cleartext rather
+    /// than wrapped by NSS, leaving their confidentiality to the caller.
+    ///
+    /// This is best effort: where the secret can't be extracted (for instance in FIPS
+    /// mode), tokens are still wrapped. Use [`ResumptionToken::is_plaintext`] to
+    /// tell which form a token has.
+    ///
+    /// # Errors
+    ///
+    /// Error returned if the NSS in use does not support this.
+    pub fn enable_plaintext_resumption_export(&mut self, enabled: bool) -> Res<()> {
+        unsafe { ssl::SSL_EnablePlaintextResumptionExport(self.agent.fd, PRBool::from(enabled)) }
     }
 
     fn ready(&mut self) -> Res<()> {
@@ -1482,7 +1519,7 @@ mod tests {
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
-            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0 }}"
+            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0, is_plaintext: false }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }
