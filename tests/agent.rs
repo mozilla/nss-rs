@@ -487,6 +487,41 @@ fn resume() {
 }
 
 #[test]
+fn resumption_token_wrapped_by_default() {
+    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
+    assert!(!token.plaintext_secret());
+}
+
+#[test]
+fn resume_with_plaintext_token() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .enable_plaintext_resumption_export(true)
+        .expect("should enable plaintext export");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut client, &mut server);
+
+    let server_records = server.send_ticket(now(), &[]).expect("ticket sent");
+    let client_records = client
+        .handshake_raw(now(), server_records.into_iter().next())
+        .expect("records ingested");
+    assert!(client_records.is_empty());
+    let token = client.resumption_token().expect("token is present");
+    assert!(token.plaintext_secret());
+
+    let mut client = Client::new("server.example", true).expect("should create second client");
+    let mut server = Server::new(&["key"]).expect("should create second server");
+    client
+        .enable_resumption(token)
+        .expect("should accept token");
+    connect(&mut client, &mut server);
+
+    assert!(client.info().unwrap().resumed());
+    assert!(server.info().unwrap().resumed());
+}
+
+#[test]
 fn resumption_token_max_early_data_size() {
     let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
     assert_eq!(token.max_early_data_size(), 0);

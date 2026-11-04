@@ -942,6 +942,7 @@ pub struct ResumptionToken {
     token: Vec<u8>,
     expiration_time: Instant,
     max_early_data_size: u32,
+    plaintext_secret: bool,
 }
 
 impl Debug for ResumptionToken {
@@ -950,6 +951,7 @@ impl Debug for ResumptionToken {
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
+            .field("plaintext_secret", &self.plaintext_secret)
             .finish()
     }
 }
@@ -970,6 +972,7 @@ impl ResumptionToken {
             token,
             expiration_time,
             max_early_data_size,
+            plaintext_secret: false,
         }
     }
 
@@ -982,6 +985,17 @@ impl ResumptionToken {
     #[must_use]
     pub const fn max_early_data_size(&self) -> u32 {
         self.max_early_data_size
+    }
+
+    /// Whether the token carries the resumption secret in cleartext, in which case
+    /// the caller is responsible for keeping it confidential.
+    /// See [`Client::enable_plaintext_resumption_export`].
+    ///
+    /// Only tokens received from a [`Client`] report this; tokens built with
+    /// [`ResumptionToken::new`] or [`ResumptionToken::new_with_early_data`] report `false`.
+    #[must_use]
+    pub const fn plaintext_secret(&self) -> bool {
+        self.plaintext_secret
     }
 }
 
@@ -1031,6 +1045,7 @@ impl Client {
         }
         let expiration_time = unsafe { info.assume_init_ref() }.expirationTime;
         let max_early_data_size = unsafe { info.assume_init_ref() }.maxEarlyDataSize;
+        let plaintext_secret = unsafe { info.assume_init_ref() }.plaintextSecret != 0;
         if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -1046,11 +1061,10 @@ impl Client {
         debug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
 
         if let Ok(t) = Time::try_from(expiration_time) {
-            resumption.push(ResumptionToken::new_with_early_data(
-                v,
-                *t,
-                max_early_data_size,
-            ));
+            resumption.push(ResumptionToken {
+                plaintext_secret,
+                ..ResumptionToken::new_with_early_data(v, *t, max_early_data_size)
+            });
         }
         ssl::SECSuccess
     }
@@ -1058,6 +1072,20 @@ impl Client {
     #[must_use]
     pub fn server_name(&self) -> &str {
         &self.server_name
+    }
+
+    /// Ask for resumption tokens that carry the resumption secret in cleartext rather
+    /// than wrapped by NSS, leaving their confidentiality to the caller.
+    ///
+    /// This is best effort: where the secret can't be extracted (for instance in FIPS
+    /// mode), tokens are still wrapped. Use [`ResumptionToken::plaintext_secret`] to
+    /// tell which form a token has.
+    ///
+    /// # Errors
+    ///
+    /// Error returned if the NSS in use does not support this.
+    pub fn enable_plaintext_resumption_export(&mut self, enabled: bool) -> Res<()> {
+        unsafe { ssl::SSL_EnablePlaintextResumptionExport(self.agent.fd, PRBool::from(enabled)) }
     }
 
     fn ready(&mut self) -> Res<()> {
@@ -1482,7 +1510,7 @@ mod tests {
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
-            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0 }}"
+            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0, plaintext_secret: false }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }
