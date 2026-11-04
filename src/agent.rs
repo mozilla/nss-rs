@@ -957,7 +957,7 @@ impl Debug for ResumptionToken {
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
-            .field("plaintext_secret", &self.plaintext_secret())
+            .field("is_plaintext", &self.is_plaintext())
             .finish()
     }
 }
@@ -999,7 +999,7 @@ impl ResumptionToken {
     /// Tokens without a plaintext secret are only usable in the process that
     /// received them and should not be persisted.
     #[must_use]
-    pub fn plaintext_secret(&self) -> bool {
+    pub fn is_plaintext(&self) -> bool {
         matches!(
             self.token.as_slice(),
             [RESUMPTION_TOKEN_VERSION, features, ..]
@@ -1087,7 +1087,7 @@ impl Client {
     /// than wrapped by NSS, leaving their confidentiality to the caller.
     ///
     /// This is best effort: where the secret can't be extracted (for instance in FIPS
-    /// mode), tokens are still wrapped. Use [`ResumptionToken::plaintext_secret`] to
+    /// mode), tokens are still wrapped. Use [`ResumptionToken::is_plaintext`] to
     /// tell which form a token has.
     ///
     /// # Errors
@@ -1519,7 +1519,7 @@ mod tests {
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
-            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0, plaintext_secret: false }}"
+            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0, is_plaintext: false }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }

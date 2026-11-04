@@ -489,7 +489,7 @@ fn resume() {
 #[test]
 fn resumption_token_wrapped_by_default() {
     let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
-    assert!(!token.plaintext_secret());
+    assert!(!token.is_plaintext());
 }
 
 #[test]
@@ -509,7 +509,7 @@ fn resume_with_plaintext_token() {
         .expect("records ingested");
     assert!(client_records.is_empty());
     let token = client.resumption_token().expect("token is present");
-    assert!(token.plaintext_secret());
+    assert!(token.is_plaintext());
 
     let mut client = Client::new("server.example", true).expect("should create second client");
     let mut server = Server::new(&["key"]).expect("should create second server");
