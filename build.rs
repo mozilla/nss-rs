@@ -286,9 +286,9 @@ fn dynamic_link() -> Vec<&'static str> {
             "nssutil3.dll",
             "nss3.dll",
             "ssl3.dll",
-            "libplds4.dll",
-            "libplc4.dll",
-            "libnspr4.dll",
+            "plds4.dll",
+            "plc4.dll",
+            "nspr4.dll",
         ]
     } else {
         ["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"]
@@ -317,11 +317,7 @@ fn static_link(libdir: &Path) -> Vec<&'static str> {
         "certhi",
         "cryptohi",
         "freebl_static",
-        if target_os == "windows" {
-            "libnspr4"
-        } else {
-            "nspr4"
-        },
+        "nspr4",
         "gcm",
         "nss_static",
         "nssb",
@@ -329,16 +325,8 @@ fn static_link(libdir: &Path) -> Vec<&'static str> {
         "nsspki",
         "nssutil",
         "pk11wrap_static",
-        if target_os == "windows" {
-            "libplc4"
-        } else {
-            "plc4"
-        },
-        if target_os == "windows" {
-            "libplds4"
-        } else {
-            "plds4"
-        },
+        "plc4",
+        "plds4",
         "softokn_static",
         "ssl",
     ];
