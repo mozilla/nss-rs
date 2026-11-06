@@ -1029,7 +1029,7 @@ impl Client {
 
     /// A new client with this client's configuration and no handshake state.
     ///
-    /// Extension handlers and resumption tokens are not carried over.
+    /// Resumption tokens are not carried over.
     ///
     /// # Errors
     ///
@@ -1042,10 +1042,12 @@ impl Client {
         // NSS copied the auth, alert, time and resumption callback args of `self`; rebind them.
         agent.bind_callbacks()?;
         agent.reset_handshake(false)?;
-        // The copied extension hooks point at the handlers of `self`.
-        self.extension_handlers
+        // The copied extension hooks point at the trackers of `self`; rebind them.
+        agent.extension_handlers = self
+            .extension_handlers
             .iter()
-            .try_for_each(|tracker| unsafe { tracker.remove_hooks(agent.fd) })?;
+            .map(|tracker| unsafe { tracker.rebind(agent.fd) })
+            .collect::<Res<_>>()?;
         agent.ech_config.clone_from(&self.ech_config);
         Self::with_agent(agent, self.server_name.clone())
     }

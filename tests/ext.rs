@@ -111,27 +111,6 @@ fn simple_extension() {
     assert!(server_handler.borrow().negotiated());
 }
 
-#[derive(Debug, Default)]
-struct ReceiveOnlyExtensionHandler {
-    handled: bool,
-}
-
-impl ExtensionHandler for ReceiveOnlyExtensionHandler {
-    fn write(
-        &mut self,
-        _msg: HandshakeMessage,
-        _ch_outer: bool,
-        _w: &mut ExtensionWriter<'_>,
-    ) -> ExtensionWriterResult {
-        ExtensionWriterResult::Skip
-    }
-
-    fn handle(&mut self, _msg: HandshakeMessage, _d: &[u8]) -> ExtensionHandlerResult {
-        self.handled = true;
-        ExtensionHandlerResult::Ok
-    }
-}
-
 fn install_handler<H: ExtensionHandler + 'static>(
     agent: &mut SecretAgent,
     handler: H,
@@ -144,27 +123,18 @@ fn install_handler<H: ExtensionHandler + 'static>(
 }
 
 #[test]
-fn duplicate_drops_extension_handlers() {
+fn duplicate_rebinds_extension_handlers() {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");
     let client_handler = install_handler(&mut client, SimpleExtensionHandler::default());
 
     let mut dup = client.duplicate().expect("should duplicate");
-    let dup_handler = install_handler(&mut dup, SimpleExtensionHandler::default());
+    drop(client);
     let mut server = Server::new(&["key"]).expect("should create server");
     let server_handler = install_handler(&mut server, SimpleExtensionHandler::default());
     connect(&mut dup, &mut server);
-    assert!(dup_handler.borrow().negotiated());
+    assert!(client_handler.borrow().negotiated());
     assert!(server_handler.borrow().negotiated());
-
-    let mut dup = client.duplicate().expect("should duplicate");
-    let mut server = Server::new(&["key"]).expect("should create server");
-    let server_handler = install_handler(&mut server, ReceiveOnlyExtensionHandler::default());
-    connect(&mut dup, &mut server);
-    assert!(!server_handler.borrow().handled);
-
-    assert!(!client_handler.borrow().written);
-    assert!(!client_handler.borrow().handled);
 }
 
 #[derive(Debug, Default)]
