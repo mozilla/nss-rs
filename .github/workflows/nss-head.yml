@@ -36,7 +36,7 @@ jobs:
   # Pinned once, so that every platform reports on the same revision.
   setup:
     name: Resolve NSS head
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       head: ${{ steps.head.outputs.sha }}
       nspr: ${{ steps.head.outputs.nspr }}
@@ -62,9 +62,11 @@ jobs:
           - ubuntu-24.04-arm
           - macos-15
           - windows-2025
-          - ubuntu-22.04
-          - macos-14
           - windows-2022
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+          - macos-26
+          - windows-11-arm
     runs-on: ${{ matrix.os }}
     # A bisect over a release's worth of NSS commits is ~7 from-scratch builds.
     timeout-minutes: 330
@@ -212,7 +214,7 @@ jobs:
     name: Report to Bugzilla
     needs: [setup, head]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       # The dev instance mirrors the NSS product, so reporting can be exercised
       # end to end without touching real bugs.

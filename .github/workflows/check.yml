@@ -27,7 +27,7 @@ defaults:
 jobs:
   metadata:
     name: Read crate metadata
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
       nss-min-version: ${{ steps.nss-meta.outputs.min-version }}
@@ -48,25 +48,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+        os:
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+          - macos-26
+          - windows-2025
+          - windows-11-arm
         rust-toolchain: ${{ fromJSON(needs.metadata.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             rust-toolchain: stable
             type: release
-          - os: macos-15
+          - os: macos-26
             rust-toolchain: stable
             type: release
           - os: windows-2025
             rust-toolchain: stable
             type: release
           # Also do some debug builds on the oldest OS versions.
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             rust-toolchain: stable
             type: debug
-          - os: macos-14
+          - os: ubuntu-24.04-arm
+            rust-toolchain: stable
+            type: debug
+          - os: macos-15
             rust-toolchain: stable
             type: debug
           - os: windows-2022
@@ -169,7 +177,7 @@ jobs:
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -186,7 +194,7 @@ jobs:
 
   check-android:
     name: Check Android
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         target: ["x86_64-linux-android", "aarch64-linux-android"]
@@ -201,7 +209,7 @@ jobs:
 
   check-i686:
     name: Check i686-unknown-linux-gnu
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -212,7 +220,7 @@ jobs:
 
   check-distro:
     name: Check with system NSS on ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: metadata
     # Tests the pkg-config codepath against distro-packaged NSS. Some distros
     # omit -L for default library search paths (e.g., /usr/lib64 on Fedora/RHEL),
@@ -313,7 +321,7 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: metadata
     strategy:
       fail-fast: false
