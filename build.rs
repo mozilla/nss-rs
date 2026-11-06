@@ -347,7 +347,9 @@ fn static_link(libdir: &Path) -> Vec<&'static str> {
     }
     if target_arch == "aarch64" {
         static_libs.push("ghash-aes-aarch64_c_lib");
-        static_libs.push("aarch64-gcm-wrap_c_lib");
+        if target_os != "windows" {
+            static_libs.push("aarch64-gcm-wrap_c_lib"); // NSS doesn't build it for Windows.
+        }
     }
     if target_arch == "x86_64" || target_arch == "x86" {
         static_libs.push("ghash-aes-x86_c_lib");
