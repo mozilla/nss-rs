@@ -181,7 +181,7 @@ pub struct TimeHolder {
 
 impl TimeHolder {
     const unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
-        let p = arg as *const PRTime;
+        let p = arg.cast::<PRTime>();
         unsafe { *p.as_ref().unwrap() }
     }
 

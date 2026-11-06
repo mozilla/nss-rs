@@ -35,7 +35,7 @@ members = ["test-fixture"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.90.0"
+rust-version = "1.95.0"
 repository = "https://github.com/mozilla/nss-rs"
 license = "MIT OR Apache-2.0"
 
