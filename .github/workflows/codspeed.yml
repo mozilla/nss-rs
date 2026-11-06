@@ -22,7 +22,7 @@ defaults:
 jobs:
   build:
     name: Build ${{ matrix.bench.name }}${{ matrix.bench.features && format('-{0}', matrix.bench.features) }} (${{ matrix.mode }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix: &matrix
