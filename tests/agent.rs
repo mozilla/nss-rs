@@ -344,7 +344,7 @@ fn server_prefers_second_client_share() {
 fn client_hello(client: &mut Client) -> Vec<u8> {
     let records = client.handshake_raw(now(), None).expect("send CH");
     let records: Vec<Record> = records.into_iter().collect();
-    let [record] = <[Record; 1]>::try_from(records).unwrap();
+    let [record] = <[Record; 1]>::try_from(records).expect("one record");
     record.data
 }
 
@@ -529,7 +529,7 @@ fn ticket_expiration(client: &mut Client, t: Instant) -> Instant {
     let records = client.handshake_raw(t, record).expect("records ingested");
     assert!(records.is_empty());
     assert_eq!(client.resumption_tokens().len(), 1);
-    client.resumption_token().unwrap().expiration_time()
+    client.resumption_token().expect("token").expiration_time()
 }
 
 #[test]
