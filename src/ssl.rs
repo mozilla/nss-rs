@@ -123,11 +123,12 @@ experimental_api! {
         cb: SSLResumptionTokenCallback,
         arg: *mut c_void,
     );
-    SSL_GetResumptionTokenInfo(
+    SSL_GetResumptionTokenInfoWithFlags(
         token: *const u8,
         token_len: c_uint,
         info: *mut SSLResumptionTokenInfo,
         len: c_uint,
+        flags: u32,
     );
     SSL_DestroyResumptionTokenInfo(
         info: *mut SSLResumptionTokenInfo,
