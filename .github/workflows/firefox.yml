@@ -22,7 +22,7 @@ env:
 jobs:
   vendor:
     name: Vendor into Gecko
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Check out nss-rs
@@ -71,10 +71,8 @@ jobs:
           p.write_text(text[:m.start(1)] + body + text[m.end(1):])
           PYEOF
 
-          # Full re-resolve: a targeted `cargo update nss-rs` would keep the
-          # stale v0.9.0 lock entry (path-dep entries carry no source field,
-          # so cargo can't match the old entry to the changed [patch] path).
-          cargo update
+          # Targeted, so the rest of Gecko's Cargo.lock stays as vendored.
+          cargo update -p nss-rs
 
           {
             echo "[[audits.nss-rs]]"

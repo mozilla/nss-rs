@@ -68,7 +68,7 @@ pub use self::{
         generate_keys as generate_ech_keys,
     },
     err::{Error, IntoResult, PRErrorCode, Res, secstatus_to_res},
-    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter, ExtensionWriterResult},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     p11::{PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
     secrets::SecretDirection,
@@ -153,12 +153,11 @@ fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
         }
         let pathstr = path.to_str().ok_or(Error::Internal)?;
         let dircstr = CString::new(pathstr)?;
-        let empty = CString::new("")?;
         secstatus_to_res(unsafe {
             nss::NSS_Initialize(
                 dircstr.as_ptr(),
-                empty.as_ptr(),
-                empty.as_ptr(),
+                c"".as_ptr(),
+                c"".as_ptr(),
                 nss::SECMOD_DB.as_ptr().cast(),
                 nss::NSS_INIT_READONLY,
             )

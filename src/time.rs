@@ -112,7 +112,7 @@ impl TryFrom<PRTime> for Time {
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
         let delta = prtime.checked_sub(base.prtime).ok_or(Error::TimeTravel)?;
-        let d = Duration::from_micros(u64::try_from(delta.abs())?);
+        let d = Duration::from_micros(delta.unsigned_abs());
         let t = if delta >= 0 {
             base.instant.checked_add(d)
         } else {
@@ -181,7 +181,7 @@ pub struct TimeHolder {
 
 impl TimeHolder {
     const unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
-        let p = arg as *const PRTime;
+        let p = arg.cast::<PRTime>();
         unsafe { *p.as_ref().unwrap() }
     }
 
@@ -248,6 +248,20 @@ mod test {
         let pr: PRTime = t.try_into().expect("convert past time to PRTime");
         let delta_micros = PRTime::try_from(DELTA.as_micros()).unwrap();
         assert_eq!(pr, base.prtime - delta_micros);
+    }
+
+    #[test]
+    fn min_delta_prtime() {
+        init();
+        let base = get_base();
+        let t = Time::try_from(PRTime::MIN + base.prtime);
+        #[cfg(windows)]
+        assert_eq!(t, Err(crate::err::Error::TimeTravel));
+        #[cfg(not(windows))]
+        {
+            let d = Duration::from_micros(PRTime::MIN.unsigned_abs());
+            assert_eq!(t, Ok(Time::from(base.instant.checked_sub(d).unwrap())));
+        }
     }
 
     #[test]

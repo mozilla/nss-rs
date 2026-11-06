@@ -5,6 +5,9 @@ self-hosted-runner:
     - moonshot
     - moonshot-exp
     - codspeed-macro-x86-ryzen-9950x-ubuntu-24-04
+    # GitHub-hosted, but unknown to actionlint 1.7.12.
+    - ubuntu-26.04
+    - ubuntu-26.04-arm
 
 # actionlint does not understand the `$/` syntax (an action in this repo at the
 # running commit), so ignore its "ref is missing" error where we use it.

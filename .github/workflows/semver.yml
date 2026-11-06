@@ -14,7 +14,7 @@ permissions:
 jobs:
   semver:
     name: Check semver
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     defaults:
       run:
@@ -36,7 +36,7 @@ jobs:
           fi
           echo "ref=$TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: mozilla/actions/rust@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+      - uses: mozilla/actions/rust@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           rust-cache: false
@@ -46,7 +46,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/semver@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+      - uses: mozilla/actions/semver@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
         with:
           base-ref: ${{ steps.tag.outputs.ref }}
 

@@ -381,8 +381,6 @@ pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::ptr::addr_of_mut;
-
     use super::*;
 
     #[test]
@@ -397,7 +395,7 @@ mod tests {
                     0x17,
                     data.as_ptr(),
                     1,
-                    addr_of_mut!(records).cast()
+                    (&raw mut records).cast()
                 ),
                 ssl::SECFailure
             );
@@ -413,7 +411,7 @@ mod tests {
                     256,
                     data.as_ptr(),
                     1,
-                    addr_of_mut!(records).cast()
+                    (&raw mut records).cast()
                 ),
                 ssl::SECFailure
             );

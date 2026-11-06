@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
 
       - &rust
-        uses: mozilla/actions/rust@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+        uses: mozilla/actions/rust@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
         with:
           version: stable
           tools: cargo-codspeed
@@ -103,7 +103,7 @@ jobs:
       - run: find target/codspeed -type f -exec chmod +x {} + # Artifacts drop the executable bit.
 
       - name: Run the benchmarks
-        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: ${{ matrix.mode }}
           run: cargo codspeed run
