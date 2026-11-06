@@ -48,7 +48,6 @@ functions = [
   "SSL_GetNextProto",
   "SSL_GetNumImplementedCiphers",
   "SSL_GetPreliminaryChannelInfo",
-  "SSL_GetResumptionTokenInfo",
   "SSL_ImportFD",
   "SSL_NamedGroupConfig",
   "SSL_OptionGetDefault",
@@ -83,6 +82,7 @@ enums = [
 variables = [
   "SSL_LIBRARY_VERSION_TLS_\\d_\\d",
   "SSL_NumImplementedCiphers",
+  "SSL_RESUMPTION_TOKEN_INFO_NO_PEER_CERT",
   "ssl_preinfo_.*",
 ]
 

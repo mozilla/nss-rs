@@ -329,6 +329,8 @@ fn static_link(libdir: &Path) -> Vec<&'static str> {
         "plds4",
         "softokn_static",
         "ssl",
+        // Since NSS 3.134, libssl uses a subset of mozpkix.
+        "mozpkix_ssl",
     ];
     // macOS always dynamically links against the system sqlite library.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
