@@ -7,8 +7,13 @@
 use std::{mem, time::Instant};
 
 use log::info;
-use nss_rs::{AuthenticationStatus, HandshakeState, RecordList, Res, SecretAgent};
+use nss_rs::{
+    AuthenticationStatus, HandshakeState, RecordList, Res, SecretAgent, ext::ExtensionHandler,
+};
 use test_fixture::now;
+
+pub struct NoopExtensionHandler;
+impl ExtensionHandler for NoopExtensionHandler {}
 
 /// Consume records until the handshake state changes.
 pub fn forward_records(
