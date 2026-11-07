@@ -1032,8 +1032,21 @@ impl Client {
         let Ok(info_len) = c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()) else {
             return ssl::SECFailure;
         };
-        let info_res =
-            unsafe { ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len) };
+        let info_res = match unsafe {
+            ssl::SSL_GetResumptionTokenInfoWithFlags(
+                token,
+                len,
+                info.as_mut_ptr(),
+                info_len,
+                ssl::SSL_RESUMPTION_TOKEN_INFO_NO_PEER_CERT,
+            )
+        } {
+            // NSS versions before 3.134 do not provide this experimental API.
+            Err(Error::Internal) => unsafe {
+                ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len)
+            },
+            res => res,
+        };
         if info_res.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
