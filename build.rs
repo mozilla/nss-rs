@@ -313,9 +313,9 @@ fn maybe_link_freebl3() -> Option<&'static str> {
 
 /// The archives in `lib_dir`: `nss_static` for `libnss_static.a` and `nss_static.lib`.
 ///
-/// On Windows this also picks up import libraries: `nss3.dll` from `nss3.dll.lib`, which
-/// [`installed_static_libs`] drops, and NSPR's `libnspr4`, which [`resolve_archive`] asks
-/// for on purpose.
+/// Only used by [`resolve_archive`] to tell whether a name from a `.pc` is something
+/// NSS built here. On Windows that includes import libraries, such as `nss3.dll` from
+/// `nss3.dll.lib`, which no `.pc` names, and NSPR's `nspr4`, which `nspr.pc` does.
 fn installed_archives(lib_dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(lib_dir) else {
         return Vec::new();
@@ -326,7 +326,8 @@ fn installed_archives(lib_dir: &Path) -> Vec<String> {
         .filter_map(|file| {
             if let Some(name) = file.strip_suffix(".lib") {
                 // MSVC has no `lib` prefix convention, so a name that carries one
-                // there is part of the library's name, as it is for NSPR.
+                // there is part of the library's name, as it is for an NSPR built
+                // for the WINNT target rather than WIN95.
                 return Some(name.to_owned());
             }
             let name = file.strip_suffix(".a")?;
@@ -430,10 +431,10 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
         let Some(required_libs) =
             pkg_config_libs(pc_dir, &required, seen).or_else(|| system_pkg_config_libs(&required))
         else {
-            // Keep what this file did describe. Discarding it would fall back to
-            // guessing from the installed archives, which for the case that gets
-            // here - `--system-nspr`, which writes the requirement but installs
-            // neither the `.pc` nor the archives - cannot supply the module either.
+            // Keep what this file did describe rather than failing: the case that
+            // gets here, `--system-nspr`, writes the requirement but installs
+            // neither the `.pc` nor the archives, and the linker may still find
+            // the system's NSPR.
             println!(
                 "cargo:warning=no {}, required by {module}.pc, and pkg-config \
                  could not supply it; linking without it",
@@ -453,7 +454,7 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
 /// graph and arrives through `Requires: nspr`.
 ///
 /// `None` when there is no such file, which at our minimum NSS version means a
-/// dist that `build.sh --static` did not produce; see [`installed_static_libs`].
+/// dist that `build.sh --static` did not produce.
 fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     pkg_config_libs(
         &lib_dir.join("pkgconfig"),
@@ -462,63 +463,21 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     )
 }
 
-/// The libraries to link, guessed from the `archives` that are installed, for a
-/// dist that has no `nss-static.pc`.
-///
-/// Android is the case this exists for: its NSS comes from application-services'
-/// `build-nss-android.sh`, which drives gyp directly and so never runs the
-/// `build.sh` that writes the file. That dist is a hand-picked set of archives,
-/// which is the case this guessing handles well. Anything else lacking a ".pc" file
-/// lands here too: `setup_standalone` does not check the NSS version, so a
-/// prebuilt dist older than our floor is guessed at rather than rejected.
-///
-/// Take whatever is installed and drop what would define a symbol twice:
-///
-/// - `<x>` shadowed by `<x>_static`, the copy built for the shared library.
-/// - `<x>_s` shadowed by `<x>`, NSPR's static build where its import library is also installed.
-///   That ordering matches [`resolve_archive`], and for the same reason: a `--static` NSS still
-///   compiles against NSPR as a DLL.
-/// - `*-nodepend*`, freebl's `FREEBL_NO_DEPEND` variants.
-/// - `*-testlib`, which duplicates what it tests.
-/// - `<x>.dll`, from a `<x>.dll.lib` import library, which the `_static` archives replace.
-///
-/// The rest is inert, as an unreferenced archive member is never pulled into the link.
-fn installed_static_libs(archives: &[String]) -> Vec<String> {
-    let installed: HashSet<&str> = archives.iter().map(String::as_str).collect();
-    let shadowed: HashSet<&str> = archives
-        .iter()
-        .filter_map(|lib| lib.strip_suffix("_static"))
-        .collect();
-    archives
-        .iter()
-        .filter(|lib| {
-            !shadowed.contains(lib.as_str())
-                && !lib.contains("-nodepend")
-                && !lib.ends_with("-testlib")
-                && !Path::new(lib.as_str())
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"))
-                && !lib
-                    .strip_suffix("_s")
-                    .is_some_and(|plain| installed.contains(plain))
-        })
-        .cloned()
-        .collect()
-}
-
 /// The archive among `archives` that a `.pc`'s `-l<name>` refers to, if NSS
 /// installed one.
 ///
-/// A `.pc` spells library names the Unix way, but MSVC has no `lib` prefix
-/// convention, so `nspr.pc` asks for `-lnspr4` where the file is `libnspr4.lib`.
+/// A `.pc` spells library names the Unix way, and they match verbatim, with one
+/// exception: an NSPR built for the WINNT target, as NSS did before 3.130, gives
+/// its Windows libraries a `lib` prefix, so `nspr.pc` asks for `-lnspr4` where the
+/// file is `libnspr4.lib`. A prebuilt `NSS_DIR` can still be one of those.
 ///
 /// NSPR also installs a `_s` archive, and that is deliberately the last resort:
 /// on Windows even a `--static` NSS compiles against NSPR as a DLL, so its
 /// objects want the `__imp_` symbols that only the import library defines.
-/// Linking `libnspr4_s.lib` to satisfy `-lnspr4` leaves those undefined.
+/// Linking `nspr4_s.lib` to satisfy `-lnspr4` leaves those undefined.
 fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a String> {
-    // Every library but NSPR on Windows matches verbatim, so spell that case out
-    // rather than building the alternatives it will not need.
+    // Every library matches verbatim but an older NSPR on Windows, so spell that
+    // case out rather than building the alternatives it will not need.
     archives.get(name).or_else(|| {
         [
             format!("lib{name}"),
@@ -531,17 +490,16 @@ fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a 
 }
 
 fn static_link(lib_dir: &Path) -> Vec<String> {
-    let installed = installed_archives(lib_dir);
     let mut named = pkg_config_static_libs(lib_dir)
         // One that names nothing is no better than no file at all.
         .filter(|libs| !libs.is_empty())
-        .unwrap_or_else(|| installed_static_libs(&installed));
-    assert!(
-        !named.is_empty(),
-        "nothing to link in {}; is this an NSS built with --static?",
-        lib_dir.display()
-    );
-    let archives: HashSet<String> = installed.into_iter().collect();
+        .unwrap_or_else(|| {
+            panic!(
+                "no libraries to link from {}; build NSS with `build.sh --static`, which writes it",
+                lib_dir.join("pkgconfig").join("nss-static.pc").display()
+            )
+        });
+    let archives: HashSet<String> = installed_archives(lib_dir).into_iter().collect();
     // macOS always dynamically links against the system sqlite library, so NSS
     // builds no copy of its own there for the .pc to name.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
