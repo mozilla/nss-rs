@@ -51,6 +51,10 @@ pub const SECSuccess: SECStatus = _SECStatus_SECSuccess;
 #[expect(non_upper_case_globals, reason = "OK here.")]
 pub const SECFailure: SECStatus = _SECStatus_SECFailure;
 
+/// `SSL_GetResumptionTokenInfoWithFlags` flag that leaves `peerCert` NULL.
+/// Defined here because the headers of NSS versions before 3.134 lack it.
+pub const SSL_RESUMPTION_TOKEN_INFO_NO_PEER_CERT: u32 = 0x1;
+
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 pub enum Opt {
@@ -128,6 +132,13 @@ experimental_api! {
         token_len: c_uint,
         info: *mut SSLResumptionTokenInfo,
         len: c_uint,
+    );
+    SSL_GetResumptionTokenInfoWithFlags(
+        token: *const u8,
+        token_len: c_uint,
+        info: *mut SSLResumptionTokenInfo,
+        len: c_uint,
+        flags: u32,
     );
     SSL_DestroyResumptionTokenInfo(
         info: *mut SSLResumptionTokenInfo,
