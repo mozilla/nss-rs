@@ -362,7 +362,7 @@ fn static_link(libdir: &Path) -> Vec<&'static str> {
     }
     // For libraries added in an NSS version greater than our minimum,
     // check that they are present before linking them.
-    for libname in ["pqcwrap_static", "crux"] {
+    for libname in ["pqcwrap_static", "crux", "mozpkix_ssl"] {
         if [format!("{libname}.lib"), format!("lib{libname}.a")]
             .iter()
             .any(|f| libdir.join(f).is_file())

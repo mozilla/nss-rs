@@ -320,6 +320,7 @@ pub struct SecretAgent {
     secrets: SecretHolder,
     raw: Option<bool>,
     io: Pin<Box<AgentIo>>,
+    completed: Pin<Box<bool>>,
     state: HandshakeState,
 
     /// Records whether authentication of certificates is required.
@@ -349,6 +350,7 @@ impl SecretAgent {
             secrets: SecretHolder::default(),
             raw: None,
             io,
+            completed: Box::pin(false),
             state: HandshakeState::New,
 
             auth_required: Box::pin(false),
@@ -423,8 +425,24 @@ impl SecretAgent {
         }
     }
 
+    unsafe extern "C" fn handshake_complete_cb(fd: *mut prio::PRFileDesc, arg: *mut c_void) {
+        let hs_complete = arg.cast::<bool>();
+        unsafe {
+            *hs_complete = true;
+        }
+        debug!("[{fd:p}] completed");
+    }
+
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool, grease: bool) -> Res<()> {
+        secstatus_to_res(unsafe {
+            ssl::SSL_HandshakeCallback(
+                self.fd,
+                Some(Self::handshake_complete_cb),
+                as_c_void(&mut self.completed),
+            )
+        })?;
+
         secstatus_to_res(unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
@@ -762,7 +780,10 @@ impl SecretAgent {
     }
 
     fn update_state(&mut self, res: Res<()>) -> Res<()> {
-        self.state = if is_blocked(&res) {
+        self.state = if *self.completed {
+            let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
+            HandshakeState::Complete(info)
+        } else if is_blocked(&res) {
             if *self.auth_required {
                 self.preinfo()?.ech_public_name()?.map_or(
                     HandshakeState::AuthenticationPending,
@@ -774,9 +795,7 @@ impl SecretAgent {
                 HandshakeState::InProgress
             }
         } else {
-            self.capture_error(res)?;
-            let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
-            HandshakeState::Complete(info)
+            return self.capture_error(res);
         };
         info!("[{self}] state -> {:?}", self.state);
         Ok(())
@@ -810,15 +829,15 @@ impl SecretAgent {
             match self.state {
                 HandshakeState::Authenticated(err) => {
                     let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, err) };
-                    // SSL_AuthCertificateComplete reports SECSuccess even when
-                    // `err` rejects the certificate, so its result cannot stand
-                    // in for handshake progress. When the certificate was
-                    // rejected, force the handshake so the failure surfaces
-                    // instead of a bogus completion.
-                    if err == 0 {
-                        rv
-                    } else {
+                    // SSL_AuthCertificateComplete reports SECSuccess when `err`
+                    // rejects the certificate, and when the certificate is
+                    // accepted before the server's CertificateVerify and
+                    // Finished arrive, so its result cannot stand in for
+                    // handshake progress. Check for completion.
+                    if rv == ssl::SECSuccess && !*self.completed {
                         unsafe { ssl::SSL_ForceHandshake(self.fd) }
+                    } else {
+                        rv
                     }
                 }
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
