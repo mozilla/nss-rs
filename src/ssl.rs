@@ -132,6 +132,10 @@ experimental_api! {
     SSL_DestroyResumptionTokenInfo(
         info: *mut SSLResumptionTokenInfo,
     );
+    SSL_EnablePlaintextResumptionExport(
+        fd: *mut PRFileDesc,
+        enabled: PRBool,
+    );
     SSL_SetCertificateCompressionAlgorithm(
         fd: *mut PRFileDesc,
         t: SSLCertificateCompressionAlgorithm,
