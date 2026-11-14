@@ -20,10 +20,10 @@ use crate::{
     },
     err::Res,
     p11::{
-        self, CK_BBOOL, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_ULONG, CKA_DERIVE, CKA_SIGN,
-        CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_HKDF_DATA, CKM_HKDF_DERIVE, CKM_HKDF_KEY_GEN,
-        CKM_SHA256, CKM_SHA384, CKM_SHA512, PK11_ImportDataKey, PK11Origin, PK11SymKey, Slot,
-        SymKey, random,
+        self, CK_ATTRIBUTE_TYPE, CK_BBOOL, CK_INVALID_HANDLE, CK_MECHANISM_TYPE, CK_ULONG,
+        CKA_DERIVE, CKA_SIGN, CKF_HKDF_SALT_DATA, CKF_HKDF_SALT_NULL, CKM_HKDF_DATA,
+        CKM_HKDF_DERIVE, CKM_HKDF_KEY_GEN, CKM_SHA256, CKM_SHA384, CKM_SHA512, PK11_ImportDataKey,
+        PK11Origin, PK11SymKey, Slot, SymKey, random,
     },
 };
 
@@ -286,6 +286,19 @@ impl Hkdf {
     }
 
     pub fn expand_key(&self, prk: &SymKey, info: &[u8], key_mech: KeyMechanism) -> Res<SymKey> {
+        self.expand_key_with_mech(prk, info, key_mech.mech(), CKA_DERIVE, key_mech.len())
+    }
+
+    /// HKDF-Expand directly into a key for the given PKCS#11 mechanism and operation,
+    /// so that the output never leaves the token.
+    pub(crate) fn expand_key_with_mech(
+        &self,
+        prk: &SymKey,
+        info: &[u8],
+        mech: CK_MECHANISM_TYPE,
+        operation: CK_ATTRIBUTE_TYPE,
+        len: usize,
+    ) -> Res<SymKey> {
         crate::init()?;
 
         let mut params = self.expand_params(info)?;
@@ -295,9 +308,9 @@ impl Hkdf {
                 **prk,
                 CKM_HKDF_DERIVE,
                 params_item.ptr(),
-                key_mech.mech(),
-                CKA_DERIVE,
-                c_int::try_from(key_mech.len())?,
+                mech,
+                operation,
+                c_int::try_from(len)?,
             )
         };
         SymKey::from_ptr(okm)

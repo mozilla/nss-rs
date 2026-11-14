@@ -20,10 +20,8 @@ use std::hint::black_box;
 use common::{CIPHERS, DATA, SIZES, secret};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use nss_rs::{
-    Mode, RecordProtection, RecordProtectionOps as _,
-    constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hp,
-    selfencrypt::SelfEncrypt,
+    Mode, RecordProtection, RecordProtectionOps as _, aead::AeadAlgorithms,
+    constants::TLS_VERSION_1_3, hkdf::HkdfAlgorithm, hp, selfencrypt::SelfEncrypt,
 };
 use test_fixture::fixture_init;
 
@@ -82,7 +80,7 @@ fn header_protection(c: &mut Criterion) {
 }
 
 fn self_encrypt(c: &mut Criterion) {
-    let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();
+    let se = SelfEncrypt::new(HkdfAlgorithm::HKDF_SHA2_256, AeadAlgorithms::Aes128Gcm).unwrap();
     let sealed = se.seal(AAD, DATA).unwrap();
     let mut group = c.benchmark_group(format!("self_encrypt/{BACKEND}"));
     group.bench_function("seal", |b| {
