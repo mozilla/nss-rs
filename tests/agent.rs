@@ -3,7 +3,7 @@ use std::ffi::CStr;
 use nss_rs::{
     AntiReplay, AuthenticationStatus, Client, Error, HandshakeState, Record, Res, ResumptionToken,
     SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256, TLS_ALERT_ECH_REQUIRED,
-    TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_CT_APPLICATION_DATA, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_3, ZeroRttCheckResult, ZeroRttChecker,
     cert::CertificateCompressor, generate_ech_keys,
 };
@@ -178,6 +178,32 @@ fn reject_certificate_fails_handshake() {
     // Continuing must not report a completed handshake.
     assert!(client.handshake(now(), &[]).is_err());
     assert!(!client.state().is_connected());
+    assert!(matches!(client.state(), HandshakeState::Failed(_)));
+}
+
+/// A record that fails authentication after the handshake is complete fails
+/// the connection.
+#[test]
+fn corrupt_record_after_handshake_fails() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    let bytes = client.handshake(now(), &[]).expect("send CH");
+    let bytes = server.handshake(now(), &bytes).expect("read CH, send SH");
+    client.handshake(now(), &bytes).expect("read SH");
+    client.authenticated(AuthenticationStatus::Ok);
+    let bytes = client.handshake(now(), &[]).expect("send CF");
+    assert!(client.state().is_connected());
+    server.handshake(now(), &bytes).expect("read CF");
+    assert!(server.state().is_connected());
+
+    let mut record = vec![TLS_CT_APPLICATION_DATA, 3, 3, 0, 32];
+    record.resize(record.len() + 32, 0);
+    let Err(Error::Nss { name, .. }) = client.handshake(now(), &record) else {
+        panic!("corrupt record should fail");
+    };
+    assert_eq!(name, "SSL_ERROR_BAD_MAC_READ");
     assert!(matches!(client.state(), HandshakeState::Failed(_)));
 }
 

@@ -774,6 +774,9 @@ impl SecretAgent {
 
     fn update_state(&mut self, res: Res<()>) -> Res<()> {
         self.state = if *self.completed {
+            if !is_blocked(&res) {
+                self.capture_error(res)?;
+            }
             let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
             HandshakeState::Complete(info)
         } else if is_blocked(&res) {
