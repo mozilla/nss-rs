@@ -900,7 +900,7 @@ fn encoder_short_write_does_not_send_heap_contents() {
 
     impl CertificateCompressor for CompressionEncoderShortWrite {
         const ID: u16 = 0x4;
-        const NAME: &CStr = c"copy";
+        const NAME: &CStr = c"short";
 
         const ENABLE_ENCODING: bool = true;
         // Claims the whole buffer without writing any of it.
