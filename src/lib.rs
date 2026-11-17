@@ -210,6 +210,8 @@ pub fn assert_initialized() {
         .expect("NSS not initialized with init or init_db");
 }
 
+/// Like `std::slice::from_raw_parts`, but accepts a null `data` pointer.
+///
 /// NSS tends to return empty "slices" with a null pointer, which will cause
 /// `std::slice::from_raw_parts` to panic if passed directly.  This wrapper avoids
 /// that issue.  It also performs conversion for lengths, as a convenience.
@@ -220,7 +222,7 @@ pub fn assert_initialized() {
 /// # Safety
 /// The caller must adhere to the safety constraints of `std::slice::from_raw_parts`,
 /// except that this will accept a null value for `data`.
-unsafe fn null_safe_slice<'a, T, L>(data: *const T, len: L) -> &'a [T]
+pub unsafe fn null_safe_slice<'a, T, L>(data: *const T, len: L) -> &'a [T]
 where
     usize: TryFrom<L>,
 {
