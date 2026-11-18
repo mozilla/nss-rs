@@ -218,6 +218,15 @@ impl ExtensionTracker {
             Ok(tracker)
         }
     }
+
+    /// A tracker for this tracker's extension and handler, with hooks installed on `fd`.
+    ///
+    /// # Safety
+    ///
+    /// As for [`ExtensionTracker::new`].
+    pub(crate) unsafe fn rebind(&self, fd: *mut PRFileDesc) -> Res<Self> {
+        unsafe { Self::new(fd, self.extension, Rc::clone(&self.handler)) }
+    }
 }
 
 impl Debug for ExtensionTracker {
