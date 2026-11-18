@@ -24,6 +24,7 @@ use std::{
 };
 
 use log::{debug, info, trace, warn};
+use zeroize::ZeroizeOnDrop;
 
 pub use crate::agentio::{Record, RecordList, as_c_void};
 use crate::{
@@ -936,20 +937,17 @@ impl Display for SecretAgent {
     }
 }
 
-#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, derive_more::AsRef)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, derive_more::AsRef, ZeroizeOnDrop)]
 pub struct ResumptionToken {
     #[as_ref([u8])]
     token: Vec<u8>,
+    #[zeroize(skip)]
     expiration_time: Instant,
+    #[zeroize(skip)]
     max_early_data_size: u32,
+    #[zeroize(skip)]
+    plaintext: bool,
 }
-
-/// The resumption token format version that has a feature bitfield in its second byte.
-/// Mirrors `SSLResumptionTokenVersion` in NSS's `lib/ssl/sslimpl.h`.
-const RESUMPTION_TOKEN_VERSION: u8 = 3;
-/// The feature bit marking a token that carries the resumption secret in cleartext.
-/// Mirrors `SSLResumptionTokenFeatureRawMS` in NSS's `lib/ssl/sslimpl.h`.
-const RESUMPTION_TOKEN_FEATURE_RAW_MS: u8 = 0x01;
 
 impl Debug for ResumptionToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -957,7 +955,7 @@ impl Debug for ResumptionToken {
             .field("token", &hex_snip_middle(&self.token))
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
-            .field("is_plaintext", &self.is_plaintext())
+            .field("is_plaintext", &self.plaintext)
             .finish()
     }
 }
@@ -965,7 +963,7 @@ impl Debug for ResumptionToken {
 impl ResumptionToken {
     #[must_use]
     pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
-        Self::new_with_early_data(token, expiration_time, 0)
+        Self::new_with_early_data(token, expiration_time, 0, false)
     }
 
     #[must_use]
@@ -973,11 +971,13 @@ impl ResumptionToken {
         token: Vec<u8>,
         expiration_time: Instant,
         max_early_data_size: u32,
+        plaintext: bool,
     ) -> Self {
         Self {
             token,
             expiration_time,
             max_early_data_size,
+            plaintext,
         }
     }
 
@@ -995,16 +995,9 @@ impl ResumptionToken {
     /// Whether the token carries the resumption secret in cleartext, in which case
     /// the caller is responsible for keeping it confidential.
     /// See [`Client::enable_plaintext_resumption_export`].
-    ///
-    /// Tokens without a plaintext secret are only usable in the process that
-    /// received them and should not be persisted.
     #[must_use]
-    pub fn is_plaintext(&self) -> bool {
-        matches!(
-            self.token.as_slice(),
-            [RESUMPTION_TOKEN_VERSION, features, ..]
-                if features & RESUMPTION_TOKEN_FEATURE_RAW_MS != 0
-        )
+    pub const fn is_plaintext(&self) -> bool {
+        self.plaintext
     }
 }
 
@@ -1054,6 +1047,7 @@ impl Client {
         }
         let expiration_time = unsafe { info.assume_init_ref() }.expirationTime;
         let max_early_data_size = unsafe { info.assume_init_ref() }.maxEarlyDataSize;
+        let plaintext = unsafe { info.assume_init_ref() }.plaintextSecret != 0;
         if unsafe { ssl::SSL_DestroyResumptionTokenInfo(info.as_mut_ptr()) }.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -1073,6 +1067,7 @@ impl Client {
                 v,
                 *t,
                 max_early_data_size,
+                plaintext,
             ));
         }
         ssl::SECSuccess
@@ -1092,7 +1087,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Error returned if the NSS in use does not support this.
+    /// Error returned if the NSS in use does not support this, or
+    /// the socket is not able to use the setting.
     pub fn enable_plaintext_resumption_export(&mut self, enabled: bool) -> Res<()> {
         unsafe { ssl::SSL_EnablePlaintextResumptionExport(self.agent.fd, PRBool::from(enabled)) }
     }

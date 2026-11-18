@@ -9,6 +9,8 @@ use nss_rs::{
 };
 
 mod handshake;
+#[path = "agent/resumption_process.rs"]
+mod resumption_process;
 use test_fixture::{anti_replay, damage_ech_config, fixture_init, now};
 
 use crate::handshake::{connect, connect_fail, forward_records};
@@ -62,9 +64,18 @@ fn zero_rtt_setup(mode: Resumption, client: &Client, server: &mut Server) -> Opt
 
 #[must_use]
 fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, ResumptionToken) {
+    resumption_setup_with_client(mode, |_| {})
+}
+
+#[must_use]
+fn resumption_setup_with_client(
+    mode: Resumption,
+    configure_client: impl FnOnce(&mut Client),
+) -> (Option<AntiReplay>, ResumptionToken) {
     fixture_init();
 
     let mut client = Client::new("server.example", true).expect("should create client");
+    configure_client(&mut client);
     let mut server = Server::new(&["key"]).expect("should create server");
     let anti_replay = zero_rtt_setup(mode, &client, &mut server);
 
@@ -487,39 +498,23 @@ fn resume() {
 }
 
 #[test]
-fn resumption_token_wrapped_by_default() {
-    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
-    assert!(!token.is_plaintext());
+fn resume_with_plaintext_token() {
+    let (_, token) = resumption_setup_with_client(Resumption::WithoutZeroRtt, |client| {
+        client
+            .enable_plaintext_resumption_export(true)
+            .expect("should enable plaintext export");
+    });
+    assert!(token.is_plaintext());
+    // A new client in this process would resume with a wrapped token too, because the
+    // wrapping key is held by this process's PKCS#11 slot. Resume from a fresh process.
+    assert!(resumption_process::resume_in_fresh_process(&token));
 }
 
 #[test]
-fn resume_with_plaintext_token() {
-    fixture_init();
-    let mut client = Client::new("server.example", true).expect("should create client");
-    if client.enable_plaintext_resumption_export(true).is_err() {
-        println!("SKIP: NSS does not support plaintext resumption export");
-        return;
-    }
-    let mut server = Server::new(&["key"]).expect("should create server");
-    connect(&mut client, &mut server);
-
-    let server_records = server.send_ticket(now(), &[]).expect("ticket sent");
-    let client_records = client
-        .handshake_raw(now(), server_records.into_iter().next())
-        .expect("records ingested");
-    assert!(client_records.is_empty());
-    let token = client.resumption_token().expect("token is present");
-    assert!(token.is_plaintext());
-
-    let mut client = Client::new("server.example", true).expect("should create second client");
-    let mut server = Server::new(&["key"]).expect("should create second server");
-    client
-        .enable_resumption(token)
-        .expect("should accept token");
-    connect(&mut client, &mut server);
-
-    assert!(client.info().unwrap().resumed());
-    assert!(server.info().unwrap().resumed());
+fn wrapped_token_does_not_resume_in_fresh_process() {
+    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
+    assert!(!token.is_plaintext());
+    assert!(!resumption_process::resume_in_fresh_process(&token));
 }
 
 #[test]
