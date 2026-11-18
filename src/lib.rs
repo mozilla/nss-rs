@@ -68,7 +68,7 @@ pub use self::{
         generate_keys as generate_ech_keys,
     },
     err::{Error, IntoResult, PRErrorCode, Res, secstatus_to_res},
-    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter, ExtensionWriterResult},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     p11::{PrivateKey, PublicKey, SymKey, random, randomize},
     replay::AntiReplay,
     secrets::SecretDirection,
@@ -153,12 +153,11 @@ fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
         }
         let pathstr = path.to_str().ok_or(Error::Internal)?;
         let dircstr = CString::new(pathstr)?;
-        let empty = CString::new("")?;
         secstatus_to_res(unsafe {
             nss::NSS_Initialize(
                 dircstr.as_ptr(),
-                empty.as_ptr(),
-                empty.as_ptr(),
+                c"".as_ptr(),
+                c"".as_ptr(),
                 nss::SECMOD_DB.as_ptr().cast(),
                 nss::NSS_INIT_READONLY,
             )
@@ -211,6 +210,8 @@ pub fn assert_initialized() {
         .expect("NSS not initialized with init or init_db");
 }
 
+/// Like `std::slice::from_raw_parts`, but accepts a null `data` pointer.
+///
 /// NSS tends to return empty "slices" with a null pointer, which will cause
 /// `std::slice::from_raw_parts` to panic if passed directly.  This wrapper avoids
 /// that issue.  It also performs conversion for lengths, as a convenience.
@@ -221,7 +222,7 @@ pub fn assert_initialized() {
 /// # Safety
 /// The caller must adhere to the safety constraints of `std::slice::from_raw_parts`,
 /// except that this will accept a null value for `data`.
-unsafe fn null_safe_slice<'a, T, L>(data: *const T, len: L) -> &'a [T]
+pub unsafe fn null_safe_slice<'a, T, L>(data: *const T, len: L) -> &'a [T]
 where
     usize: TryFrom<L>,
 {

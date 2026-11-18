@@ -786,6 +786,45 @@ fn ech_public_name_outlives_agent() {
     assert_eq!(name, PUBLIC_NAME);
 }
 
+/// `SecretAgentPreInfo` is an owned value with no tie to the agent, so it can
+/// be kept past the point where NSS frees its socket state. Reading the public
+/// name from it afterwards must not touch that freed memory.
+#[test]
+fn ech_public_name_from_preinfo_after_close() {
+    const PUBLIC_NAME: &str = "public.example";
+    const PRIVATE_NAME: &str = "private.example";
+    const CONFIG_ID: u8 = 7;
+
+    fixture_init();
+    let mut server = Server::new(&["key"]).unwrap();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();
+
+    let mut client = Client::new(PRIVATE_NAME, true).unwrap();
+    client
+        .enable_ech(damage_ech_config(server.ech_config()))
+        .unwrap();
+
+    let records = client.handshake_raw(now(), None).unwrap();
+    let records = forward_records(now(), &mut server, records).unwrap();
+    let records = forward_records(now(), &mut client, records).unwrap();
+    assert!(records.is_empty());
+
+    assert_eq!(
+        *client.state(),
+        HandshakeState::EchFallbackAuthenticationPending(String::from(PUBLIC_NAME))
+    );
+    client.authenticated(AuthenticationStatus::Ok);
+    let Err(Error::EchRetry(_)) = client.handshake_raw(now(), None) else {
+        panic!("expected EchRetry, state {:?}", client.state());
+    };
+
+    let preinfo = client.preinfo().unwrap();
+    // Closing frees NSS's ssl3.hs.echPublicName before the name is read.
+    client.close();
+    assert_eq!(preinfo.ech_public_name().unwrap().unwrap(), PUBLIC_NAME);
+}
+
 #[test]
 fn connection_succeeds_when_server_and_client_support_cert_compr_copy() {
     struct IncDecCompression {}
@@ -1037,6 +1076,78 @@ fn connection_fails_encoder_returned_too_long() {
         .unwrap();
 
     connect_fail(&mut client, &mut server);
+}
+
+#[test]
+fn encoder_short_write_does_not_send_heap_contents() {
+    thread_local! {
+        static RECEIVED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    struct CompressionEncoderShortWrite {}
+
+    impl CertificateCompressor for CompressionEncoderShortWrite {
+        const ID: u16 = 0x4;
+        const NAME: &CStr = c"short";
+
+        const ENABLE_ENCODING: bool = true;
+        // Claims the whole buffer without writing any of it.
+        fn encode(_input: &[u8], output: &mut [u8]) -> Res<usize> {
+            Ok(output.len())
+        }
+
+        fn decode(input: &[u8], _output: &mut [u8]) -> Res<()> {
+            RECEIVED.with_borrow_mut(|r| r.extend_from_slice(input));
+            Err(Error::CertificateDecoding)
+        }
+    }
+
+    struct CopyCompression {}
+
+    impl CertificateCompressor for CopyCompression {
+        const ID: u16 = 0x4;
+        const NAME: &CStr = c"copy";
+        const ENABLE_ENCODING: bool = true;
+
+        fn decode(input: &[u8], output: &mut [u8]) -> Res<()> {
+            let len = std::cmp::min(input.len(), output.len());
+            output[..len].copy_from_slice(&input[..len]);
+            Ok(())
+        }
+    }
+
+    fixture_init();
+    // Leave handshake data from an earlier connection on the heap.
+    {
+        let mut client = Client::new("server.example", true).expect("should create client");
+        let mut server = Server::new(&["key"]).expect("should create server");
+        client
+            .set_certificate_compression::<CopyCompression>()
+            .unwrap();
+        server
+            .set_certificate_compression::<CopyCompression>()
+            .unwrap();
+        connect(&mut client, &mut server);
+    }
+
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    server
+        .set_certificate_compression::<CompressionEncoderShortWrite>()
+        .unwrap();
+
+    client
+        .set_certificate_compression::<CompressionEncoderShortWrite>()
+        .unwrap();
+
+    connect_fail(&mut client, &mut server);
+
+    // The bytes the encoder did not write must not carry stale heap memory.
+    RECEIVED.with_borrow(|r| {
+        assert!(!r.is_empty());
+        assert!(r.iter().all(|&b| b == 0));
+    });
 }
 
 fn connected_pair() -> (Client, Server) {

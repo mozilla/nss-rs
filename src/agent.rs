@@ -139,9 +139,19 @@ fn get_alpn(fd: *mut prio::PRFileDesc, pre: bool) -> Res<Option<String>> {
     Ok(alpn)
 }
 
+fn get_ech_public_name(info: &ssl::SSLPreliminaryChannelInfo) -> Option<CString> {
+    if info.valuesSet & ssl::ssl_preinfo_ech == 0 || info.echPublicName.is_null() {
+        return None;
+    }
+    // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
+    // that NSS frees on reset/close, so take a copy while the socket is alive.
+    Some(unsafe { CStr::from_ptr(info.echPublicName) }.to_owned())
+}
+
 pub struct SecretAgentPreInfo {
     info: ssl::SSLPreliminaryChannelInfo,
     alpn: Option<String>,
+    ech_public_name: Option<CString>,
 }
 
 macro_rules! preinfo_arg {
@@ -171,8 +181,10 @@ impl SecretAgentPreInfo {
             )
         })?;
 
+        let info = unsafe { info.assume_init() };
         Ok(Self {
-            info: unsafe { info.assume_init() },
+            ech_public_name: get_ech_public_name(&info),
+            info,
             alpn: get_alpn(fd, true)?,
         })
     }
@@ -219,16 +231,12 @@ impl SecretAgentPreInfo {
     /// # Errors
     ///
     /// When the public name is not valid UTF-8.  (Note: names should be ASCII.)
-    pub fn ech_public_name(&self) -> Res<Option<String>> {
-        if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 || self.info.echPublicName.is_null() {
-            Ok(None)
-        } else {
-            // `echPublicName` points at NSS socket memory (ssl3.hs.echPublicName)
-            // that NSS frees on reset/close, not at anything this struct owns, so
-            // hand back an owned copy rather than a borrow tied to `&self`.
-            let n = unsafe { CStr::from_ptr(self.info.echPublicName) };
-            Ok(Some(n.to_str()?.to_owned()))
-        }
+    pub fn ech_public_name(&self) -> Res<Option<&str>> {
+        Ok(self
+            .ech_public_name
+            .as_deref()
+            .map(CStr::to_str)
+            .transpose()?)
     }
 
     #[must_use]
@@ -365,8 +373,7 @@ impl SecretAgent {
     // ssl::SSL_* APIs only need an opaque type.
     fn create_fd(io: &mut Pin<Box<AgentIo>>) -> Res<*mut prio::PRFileDesc> {
         assert_initialized();
-        let label = CString::new("sslwrapper")?;
-        let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
+        let id = unsafe { prio::PR_GetUniqueIdentity(c"sslwrapper".as_ptr()) };
 
         let base_fd = unsafe { prio::PR_CreateIOLayerStub(id, METHODS) };
         if base_fd.is_null() {
@@ -760,7 +767,9 @@ impl SecretAgent {
             if *self.auth_required {
                 self.preinfo()?.ech_public_name()?.map_or(
                     HandshakeState::AuthenticationPending,
-                    HandshakeState::EchFallbackAuthenticationPending,
+                    |public_name| {
+                        HandshakeState::EchFallbackAuthenticationPending(public_name.to_owned())
+                    },
                 )
             } else {
                 HandshakeState::InProgress

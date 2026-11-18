@@ -115,16 +115,45 @@ pub fn context_specific_explicit_tag(tag: u8, content: &[u8]) -> Result<Vec<u8>,
 // Given "tag || len || value || rest" where tag and len are of length one, len is in [0, 127],
 // and value is of length len, returns (value, rest)
 pub const fn expect_tag_with_short_len(tag: u8, z: &[u8]) -> Result<(&[u8], &[u8]), Error> {
-    if z.is_empty() {
+    let [t, len @ 0..0x80, z @ ..] = z else {
         return Err(Error::InvalidInput);
+    };
+    match z.split_at_checked(*len as usize) {
+        Some(r) if *t == tag => Ok(r),
+        _ => Err(Error::InvalidInput),
     }
-    let (h, z) = z.split_at(1);
-    if h[0] != tag || z.is_empty() {
-        return Err(Error::InvalidInput);
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::expect_tag_with_short_len;
+    use crate::Error;
+
+    #[test]
+    fn short_len_valid() {
+        let res = expect_tag_with_short_len(0x04, &[0x04, 0x02, 0xaa, 0xbb, 0xcc]);
+        assert_eq!(res, Ok((&[0xaa, 0xbb][..], &[0xcc][..])));
+        let res = expect_tag_with_short_len(0x04, &[0x04, 0x00]);
+        assert_eq!(res, Ok((&[][..], &[][..])));
     }
-    let (h, z) = z.split_at(1);
-    if h[0] >= 0x80 || h[0] as usize > z.len() {
-        return Err(Error::InvalidInput);
+
+    #[test]
+    fn short_len_wrong_tag() {
+        let res = expect_tag_with_short_len(0x04, &[0x05, 0x01, 0xaa]);
+        assert_eq!(res, Err(Error::InvalidInput));
     }
-    Ok(z.split_at(h[0] as usize))
+
+    #[test]
+    fn short_len_long_form() {
+        let res = expect_tag_with_short_len(0x04, &[0x04, 0x81, 0x01, 0xaa]);
+        assert_eq!(res, Err(Error::InvalidInput));
+    }
+
+    #[test]
+    fn short_len_truncated() {
+        for z in [&[][..], &[0x04], &[0x04, 0x02, 0xaa]] {
+            assert_eq!(expect_tag_with_short_len(0x04, z), Err(Error::InvalidInput));
+        }
+    }
 }

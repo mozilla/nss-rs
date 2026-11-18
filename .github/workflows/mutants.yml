@@ -19,7 +19,7 @@ env:
 jobs:
   baseline:
     name: Baseline test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       timeout: ${{ steps.baseline.outputs.timeout }}
       shards: ${{ steps.baseline.outputs.shards }}
@@ -54,7 +54,7 @@ jobs:
   mutants:
     name: Find mutants (shard ${{ matrix.shard }}/${{ needs.baseline.outputs.max_shard }})
     needs: baseline
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +100,7 @@ jobs:
     name: Results
     if: ${{ !cancelled() }}
     needs: mutants
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

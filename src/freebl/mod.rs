@@ -15,7 +15,7 @@
 use std::ffi::CStr;
 use std::{
     os::raw::{c_int, c_uchar, c_uint, c_void},
-    sync::OnceLock,
+    sync::LazyLock,
 };
 
 use log::error;
@@ -144,13 +144,10 @@ unsafe extern "C" {
     fn FREEBL_GetVector() -> *const FREEBLVectorStr;
 }
 
-static FREEBL: OnceLock<Res<FreeblFns>> = OnceLock::new();
+static FREEBL: LazyLock<Res<FreeblFns>> = LazyLock::new(load_freebl_fns);
 
 fn freebl_result() -> Res<&'static FreeblFns> {
-    FREEBL
-        .get_or_init(load_freebl_fns)
-        .as_ref()
-        .map_err(Clone::clone)
+    FREEBL.as_ref().map_err(Clone::clone)
 }
 
 pub fn init() -> Res<()> {
