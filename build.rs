@@ -313,30 +313,27 @@ fn maybe_link_freebl3() -> Option<&'static str> {
 
 /// The archives in `lib_dir`: `nss_static` for `libnss_static.a` and `nss_static.lib`.
 ///
-/// Only used by [`resolve_archive`] to tell whether a name from a `.pc` is something
-/// NSS built here. On Windows that includes import libraries, such as `nss3.dll` from
-/// `nss3.dll.lib`, which no `.pc` names, and NSPR's `nspr4`, which `nspr.pc` does.
-fn installed_archives(lib_dir: &Path) -> Vec<String> {
+/// Only used to tell whether a name from a `.pc` is something NSS built here. On
+/// Windows that includes import libraries, such as `nss3.dll` from `nss3.dll.lib`,
+/// which no `.pc` names, and NSPR's `nspr4`, which `nspr.pc` does: a `--static` NSS
+/// still compiles against NSPR as a DLL there, so the import library is the one to
+/// link, not `nspr4_s.lib`.
+fn installed_archives(lib_dir: &Path) -> HashSet<String> {
     let Ok(entries) = fs::read_dir(lib_dir) else {
-        return Vec::new();
+        return HashSet::new();
     };
-    let mut libs: Vec<String> = entries
+    entries
         .flatten()
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter_map(|file| {
+            // MSVC has no `lib` prefix convention.
             if let Some(name) = file.strip_suffix(".lib") {
-                // MSVC has no `lib` prefix convention, so a name that carries one
-                // there is part of the library's name, as it is for an NSPR built
-                // for the WINNT target rather than WIN95.
                 return Some(name.to_owned());
             }
             let name = file.strip_suffix(".a")?;
             Some(name.strip_prefix("lib").unwrap_or(name).to_owned())
         })
-        .collect();
-    libs.sort_unstable();
-    libs.dedup();
-    libs
+        .collect()
 }
 
 /// The `-l` names a system pkg-config reports for `module`, for a requirement the
@@ -463,32 +460,6 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     )
 }
 
-/// The archive among `archives` that a `.pc`'s `-l<name>` refers to, if NSS
-/// installed one.
-///
-/// A `.pc` spells library names the Unix way, and they match verbatim, with one
-/// exception: an NSPR built for the WINNT target, as NSS did before 3.130, gives
-/// its Windows libraries a `lib` prefix, so `nspr.pc` asks for `-lnspr4` where the
-/// file is `libnspr4.lib`. A prebuilt `NSS_DIR` can still be one of those.
-///
-/// NSPR also installs a `_s` archive, and that is deliberately the last resort:
-/// on Windows even a `--static` NSS compiles against NSPR as a DLL, so its
-/// objects want the `__imp_` symbols that only the import library defines.
-/// Linking `nspr4_s.lib` to satisfy `-lnspr4` leaves those undefined.
-fn resolve_archive<'a>(archives: &'a HashSet<String>, name: &str) -> Option<&'a String> {
-    // Every library matches verbatim but an older NSPR on Windows, so spell that
-    // case out rather than building the alternatives it will not need.
-    archives.get(name).or_else(|| {
-        [
-            format!("lib{name}"),
-            format!("{name}_s"),
-            format!("lib{name}_s"),
-        ]
-        .iter()
-        .find_map(|candidate| archives.get(candidate))
-    })
-}
-
 fn static_link(lib_dir: &Path) -> Vec<String> {
     let mut named = pkg_config_static_libs(lib_dir)
         // One that names nothing is no better than no file at all.
@@ -499,31 +470,23 @@ fn static_link(lib_dir: &Path) -> Vec<String> {
                 lib_dir.join("pkgconfig").join("nss-static.pc").display()
             )
         });
-    let archives: HashSet<String> = installed_archives(lib_dir).into_iter().collect();
+    let archives = installed_archives(lib_dir);
     // macOS always dynamically links against the system sqlite library, so NSS
     // builds no copy of its own there for the .pc to name.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
     if env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" {
         named.push(String::from("sqlite3"));
     }
-    // Return what was linked, not what the .pc called it, so that `link_search`
-    // can find the files again.
+    for name in &named {
+        // Whatever NSS didn't build here has to come from the system.
+        let kind = if archives.contains(name) {
+            "static"
+        } else {
+            "dylib"
+        };
+        println!("cargo:rustc-link-lib={kind}={name}");
+    }
     named
-        .iter()
-        .map(|name| {
-            resolve_archive(&archives, name).map_or_else(
-                || {
-                    // Whatever NSS didn't build here has to come from the system.
-                    println!("cargo:rustc-link-lib=dylib={name}");
-                    name.clone()
-                },
-                |archive| {
-                    println!("cargo:rustc-link-lib=static={archive}");
-                    archive.clone()
-                },
-            )
-        })
-        .collect()
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
