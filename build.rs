@@ -527,6 +527,30 @@ impl ParseCallbacks for Pkcs11Types {
     }
 }
 
+/// The `--target=` that the C compiler for this Android target is given, which
+/// names the API level as well as the architecture: `--target=aarch64-linux-android23`.
+///
+/// NDK r30's headers refuse an unversioned target triple, which is all that
+/// bindgen derives from the Rust target. cargo-ndk passes the versioned one in
+/// the C flags, where the `cc` crate looks for them, but not to bindgen.
+fn android_clang_target() -> Option<String> {
+    let target = env::var("TARGET").ok()?;
+    let vars = [
+        format!("CFLAGS_{target}"),
+        format!("CFLAGS_{}", target.replace('-', "_")),
+        String::from("TARGET_CFLAGS"),
+        String::from("CFLAGS"),
+    ];
+    vars.iter().find_map(|var| {
+        println!("cargo:rerun-if-env-changed={var}");
+        env::var(var)
+            .ok()?
+            .split_whitespace()
+            .find(|flag| flag.starts_with("--target="))
+            .map(String::from)
+    })
+}
+
 fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
     let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
@@ -556,6 +580,10 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         } else if target_os == "android" {
             builder = builder.clang_arg("-DLINUX");
             builder = builder.clang_arg("-DANDROID");
+            // bindgen only adds its own, unversioned, --target if there is none.
+            if let Some(clang_target) = android_clang_target() {
+                builder = builder.clang_arg(clang_target);
+            }
         }
         if bindings.cplusplus {
             builder = builder.clang_args(["-x", "c++", "-std=c++14"]);
