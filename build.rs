@@ -357,8 +357,12 @@ fn static_link(libdir: &Path) -> Vec<&'static str> {
         static_libs.push("ghash-aes-x86_c_lib");
         static_libs.push("sha-x86_c_lib");
     }
-    if target_arch == "x86_64" {
+    // Despite its name, since NSS 3.134 this library also holds the HACL*
+    // Vec128 (NEON) ChaCha20-Poly1305 code on aarch64.
+    if target_arch == "x86_64" || target_arch == "aarch64" {
         static_libs.push("hw-acc-crypto-avx");
+    }
+    if target_arch == "x86_64" {
         static_libs.push("hw-acc-crypto-avx2");
         static_libs.push("intel-gcm-wrap_c_lib");
     }
