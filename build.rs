@@ -311,13 +311,10 @@ fn maybe_link_freebl3() -> Option<&'static str> {
     None
 }
 
-/// The archives in `lib_dir`: `nss_static` for `libnss_static.a` and `nss_static.lib`.
+/// The archives in `lib_dir`, by link name: `nss_static` for `libnss_static.a` or `nss_static.lib`.
 ///
-/// Only used to tell whether a name from a `.pc` is something NSS built here. On
-/// Windows that includes import libraries, such as `nss3.dll` from `nss3.dll.lib`,
-/// which no `.pc` names, and NSPR's `nspr4`, which `nspr.pc` does: a `--static` NSS
-/// still compiles against NSPR as a DLL there, so the import library is the one to
-/// link, not `nspr4_s.lib`.
+/// On Windows this includes NSPR's import library, `nspr4.lib`, which is the one to link: even a
+/// `--static` NSS uses NSPR as a DLL there.
 fn installed_archives(lib_dir: &Path) -> HashSet<String> {
     let Ok(entries) = fs::read_dir(lib_dir) else {
         return HashSet::new();
@@ -336,24 +333,12 @@ fn installed_archives(lib_dir: &Path) -> HashSet<String> {
         .collect()
 }
 
-/// The `-l` names a system pkg-config reports for `module`, for a requirement the
-/// dist does not describe itself.
+/// The `-l` names that the system's pkg-config gives for `module`; its `-L` paths are added.
 ///
-/// `build.sh --with-nspr`/`--system-nspr` installs no `nspr.pc` beside the
-/// archives, yet still writes `Requires: nspr` into `nss-static.pc`. The system
-/// NSPR that satisfies it brings its own `.pc`, so ask for it the usual way.
-///
-/// Its `-L` is searched as well: a module reached this way is by definition not
-/// in the dist, so it need not be anywhere the linker already looks.
-///
-/// `None` where there is no pkg-config to run, which is every target that made
-/// the in-tree parser necessary in the first place, and for a cross build that
-/// has not said which pkg-config to trust.
+/// For `build.sh --system-nspr`, which writes `Requires: nspr` but installs no `nspr.pc`.
 fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
-    // Via the crate rather than the binary: it honours `PKG_CONFIG` and the
-    // target-suffixed `PKG_CONFIG_*`, rewrites `PKG_CONFIG_SYSROOT_DIR`, and
-    // refuses a host pkg-config in a cross build rather than reporting the
-    // host's libraries for the target.
+    // The crate, unlike the binary, honours `PKG_CONFIG*` and won't use the host's when cross
+    // compiling.
     let library = pkg_config::Config::new()
         .statik(true)
         .cargo_metadata(false)
@@ -366,13 +351,7 @@ fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
     Some(library.libs)
 }
 
-/// The module names in the pkg-config `Requires:` field without version constraints.
-///
-/// Each comma-separated entry names a module, optionally followed by a version
-/// constraint that needs no surrounding space: `nspr >= 4.40`, `nspr >=4.40` and
-/// `nspr>=4.40` all name just `nspr`. An entry may also name several modules, in
-/// which case only the last of them can carry a constraint - enough for the files
-/// NSS and NSPR write.
+/// The module names in a `Requires:` field, without version constraints.
 fn required_modules(field: &str) -> impl Iterator<Item = String> {
     field.split(',').flat_map(|entry| {
         entry
@@ -383,19 +362,10 @@ fn required_modules(field: &str) -> impl Iterator<Item = String> {
     })
 }
 
-/// The `-l` names in `<module>.pc`, then those of everything it requires.
+/// The `-l` names in `<module>.pc`, then those of the modules it requires.
 ///
-/// This only looks at `-l` items in `libs[.private]:` directives and
-/// the unversioned portion of `requires[.private]:` directives.
-/// It does not expand variables.
-/// `-L` options are assumed to be already on the search path.
-///
-/// Shelling out to the real thing would give us these for free, but it is not
-/// there to shell out to on the Windows and Android builds that need this.
-/// NSS and NSPR builds produce ".pc" files that don't need those features.
-///
-/// Each module is emitted once, at its first mention, which for a graph deeper
-/// than NSS's `nss-static` -> `nspr` need not be a correct link order.
+/// Parses just `Libs` and `Requires` (and `.private`), without expanding variables, which is
+/// enough for NSS's and NSPR's files; Windows and Android builds have no pkg-config to run.
 fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> Option<Vec<String>> {
     if !seen.insert(module.to_owned()) {
         return Some(Vec::new());
@@ -407,8 +377,7 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
     let mut libs = Vec::new();
     let mut requires = Vec::new();
     for line in text.lines() {
-        // Fields are `Name: value`. A variable definition can hold a colon too,
-        // in a Windows drive letter, but its key matches no field below.
+        // `Name: value`; variable definitions match no field below.
         let Some((key, value)) = line.split_once(':') else {
             continue;
         };
@@ -423,15 +392,12 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
             _ => {}
         }
     }
-    // A required module is a dependency, so it links last.
+    // Requirements link after the module that needs them.
     for required in requires {
         let Some(required_libs) =
             pkg_config_libs(pc_dir, &required, seen).or_else(|| system_pkg_config_libs(&required))
         else {
-            // Keep what this file did describe rather than failing: the case that
-            // gets here, `--system-nspr`, writes the requirement but installs
-            // neither the `.pc` nor the archives, and the linker may still find
-            // the system's NSPR.
+            // The linker may still find it, e.g. a system NSPR.
             println!(
                 "cargo:warning=no {}, required by {module}.pc, and pkg-config \
                  could not supply it; linking without it",
@@ -444,14 +410,7 @@ fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> O
     Some(libs)
 }
 
-/// The libraries to link, in link order, as `nss-static.pc` names them.
-///
-/// `build.sh --static` derives that from the gyp graph of the build it just did,
-/// so it matches how this NSS actually splits into archives. NSPR is not in that
-/// graph and arrives through `Requires: nspr`.
-///
-/// `None` when there is no such file, which at our minimum NSS version means a
-/// dist that `build.sh --static` did not produce.
+/// The libraries to link, in order, from the `nss-static.pc` that `build.sh --static` writes.
 fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
     pkg_config_libs(
         &lib_dir.join("pkgconfig"),
@@ -462,7 +421,7 @@ fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
 
 fn static_link(lib_dir: &Path) -> Vec<String> {
     let mut named = pkg_config_static_libs(lib_dir)
-        // One that names nothing is no better than no file at all.
+        // An empty list is as useless as a missing file.
         .filter(|libs| !libs.is_empty())
         .unwrap_or_else(|| {
             panic!(
@@ -471,14 +430,13 @@ fn static_link(lib_dir: &Path) -> Vec<String> {
             )
         });
     let archives = installed_archives(lib_dir);
-    // macOS always dynamically links against the system sqlite library, so NSS
-    // builds no copy of its own there for the .pc to name.
+    // macOS uses the system's sqlite, which the .pc doesn't name.
     // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
     if env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" {
         named.push(String::from("sqlite3"));
     }
     for name in &named {
-        // Whatever NSS didn't build here has to come from the system.
+        // Anything NSS didn't build comes from the system.
         let kind = if archives.contains(name) {
             "static"
         } else {
@@ -527,12 +485,10 @@ impl ParseCallbacks for Pkcs11Types {
     }
 }
 
-/// The `--target=` that the C compiler for this Android target is given, which
-/// names the API level as well as the architecture: `--target=aarch64-linux-android23`.
+/// The versioned `--target=` (e.g. `aarch64-linux-android23`) from the target's C flags.
 ///
-/// NDK r30's headers refuse an unversioned target triple, which is all that
-/// bindgen derives from the Rust target. cargo-ndk passes the versioned one in
-/// the C flags, where the `cc` crate looks for them, but not to bindgen.
+/// NDK r30's headers reject the unversioned triple that bindgen derives from the Rust target, and
+/// cargo-ndk only passes the versioned one in the C flags.
 fn android_clang_target() -> Option<String> {
     let target = env::var("TARGET").ok()?;
     let vars = [
@@ -580,7 +536,7 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         } else if target_os == "android" {
             builder = builder.clang_arg("-DLINUX");
             builder = builder.clang_arg("-DANDROID");
-            // bindgen only adds its own, unversioned, --target if there is none.
+            // bindgen adds its own --target only if none is given.
             if let Some(clang_target) = android_clang_target() {
                 builder = builder.clang_arg(clang_target);
             }
