@@ -32,7 +32,7 @@ runs:
       with:
         working-directory: ${{ inputs.working-directory }}
         target: ${{ inputs.target }}
-        token: ${{ inputs.github-token }}
+        android-api: ${{ inputs.api-level }}
 
     - shell: bash
       env:

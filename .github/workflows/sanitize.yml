@@ -47,8 +47,6 @@ jobs:
           rust-cache: false
 
       - uses: $/install-nss
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests with sanitizers
         env:
