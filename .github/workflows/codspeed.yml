@@ -49,8 +49,6 @@ jobs:
           rust-cache: false
 
       - uses: $/install-nss
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build the benchmark target
         env:
