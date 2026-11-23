@@ -24,7 +24,7 @@ use std::{
 };
 
 use log::{debug, info, trace, warn};
-use zeroize::ZeroizeOnDrop;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub use crate::agentio::{Record, RecordList, as_c_void};
 use crate::{
@@ -946,25 +946,36 @@ impl Display for SecretAgent {
     }
 }
 
-#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, derive_more::AsRef, ZeroizeOnDrop)]
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Zeroize)]
+enum TokenKind {
+    Plaintext(Vec<u8>),
+    Encrypted(Vec<u8>),
+}
+
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, ZeroizeOnDrop)]
 pub struct ResumptionToken {
-    #[as_ref([u8])]
-    token: Vec<u8>,
+    token: TokenKind,
     #[zeroize(skip)]
     expiration_time: Instant,
     #[zeroize(skip)]
     max_early_data_size: u32,
-    #[zeroize(skip)]
-    plaintext: bool,
+}
+
+impl AsRef<[u8]> for ResumptionToken {
+    fn as_ref(&self) -> &[u8] {
+        match &self.token {
+            TokenKind::Plaintext(t) | TokenKind::Encrypted(t) => t,
+        }
+    }
 }
 
 impl Debug for ResumptionToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResumptionToken")
-            .field("token", &hex_snip_middle(&self.token))
+            .field("token", &hex_snip_middle(self.as_ref()))
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
-            .field("is_plaintext", &self.plaintext)
+            .field("is_plaintext", &self.is_plaintext())
             .finish()
     }
 }
@@ -983,10 +994,13 @@ impl ResumptionToken {
         plaintext: bool,
     ) -> Self {
         Self {
-            token,
+            token: if plaintext {
+                TokenKind::Plaintext(token)
+            } else {
+                TokenKind::Encrypted(token)
+            },
             expiration_time,
             max_early_data_size,
-            plaintext,
         }
     }
 
@@ -1006,7 +1020,7 @@ impl ResumptionToken {
     /// See [`Client::enable_plaintext_resumption_export`].
     #[must_use]
     pub const fn is_plaintext(&self) -> bool {
-        self.plaintext
+        matches!(self.token, TokenKind::Plaintext(_))
     }
 }
 
