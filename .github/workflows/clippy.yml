@@ -52,8 +52,6 @@ jobs:
           rust-cache: false
 
       - uses: $/install-nss
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Use cargo-hack to run clippy on each crate individually with its
       # respective default features only. Can reveal warnings otherwise

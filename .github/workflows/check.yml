@@ -98,8 +98,6 @@ jobs:
           rust-cache: false
 
       - uses: $/install-nss
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check feature powerset
         run: |
@@ -126,8 +124,9 @@ jobs:
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
+          # Coverage is broken on Windows ARM64, see https://github.com/rust-lang/rust/issues/150123
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "stable" ]; then
+          if [ "$TOOLCHAIN" == "stable" ] && [ "$RUNNER_OS-$RUNNER_ARCH" != "Windows-ARM64" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
@@ -237,7 +236,7 @@ jobs:
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
-            container: opensuse/tumbleweed:latest@sha256:0afa1776a6caada91802c6866df7b09edabe248876baf79a1a99918b377ca08c
+            container: opensuse/tumbleweed:latest@sha256:3e4ba7f382638c643eb5805d959637d9a59ede4f640fe9407106493fc6ac9ede
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
@@ -252,7 +251,7 @@ jobs:
             rustflags: "-C target-feature=-crt-static"
           - name: Gentoo
             # renovate: depName=gentoo/stage3 datasource=docker
-            container: gentoo/stage3:latest@sha256:5743d40989d399a2bd4427937edc534502aca531745391f5b96ba013aea6d5a8
+            container: gentoo/stage3:latest@sha256:5bdb8a220b2f0ea34006abf5132396417599d563ba233f9a31861097af499557
             install: >-
               emerge-webrsync -q &&
               emerge -q --getbinpkg --quiet-build=y -1 llvm-core/clang dev-util/pkgconf dev-vcs/git net-misc/curl &&
@@ -315,7 +314,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           # renovate: depName=cargo-bins/cargo-binstall datasource=github-releases
-          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.26.2/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL https://github.com/cargo-bins/cargo-binstall/releases/download/v1.28.0/cargo-binstall-x86_64-unknown-linux-musl.tgz | tar -xzf - -C "$HOME/.cargo/bin"
           cargo binstall --no-confirm cargo-hack
           cargo hack build --feature-powerset --no-dev-deps --exclude-features gecko --mutually-exclusive-features blapi,disable-encryption
 

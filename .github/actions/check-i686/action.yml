@@ -35,7 +35,6 @@ runs:
       with:
         working-directory: ${{ inputs.working-directory }}
         target: i686-unknown-linux-gnu
-        token: ${{ inputs.github-token }}
 
     - name: Compile tests (no-run)
       shell: bash

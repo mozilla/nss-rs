@@ -36,8 +36,6 @@ jobs:
           rust-cache: false
 
       - uses: $/install-nss
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run baseline test
         id: baseline
@@ -72,8 +70,6 @@ jobs:
           rust-cache: false
 
       - uses: $/install-nss
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find mutants
         env:

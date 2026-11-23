@@ -279,7 +279,7 @@ fn link_search<S: AsRef<str>>(dir: &Path, libs: &[S]) {
     rerun_if_libs_changed(dir, libs);
 }
 
-fn dynamic_link() -> Vec<&'static str> {
+fn dynamic_link() -> Vec<String> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let dynamic_libs = if target_os == "windows" {
         [
@@ -299,6 +299,7 @@ fn dynamic_link() -> Vec<&'static str> {
     dynamic_libs
         .into_iter()
         .chain(maybe_link_freebl3())
+        .map(String::from)
         .collect()
 }
 
@@ -310,68 +311,140 @@ fn maybe_link_freebl3() -> Option<&'static str> {
     None
 }
 
-fn static_link(libdir: &Path) -> Vec<&'static str> {
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let mut static_libs = vec![
-        "certdb",
-        "certhi",
-        "cryptohi",
-        "freebl_static",
-        "nspr4",
-        "gcm",
-        "nss_static",
-        "nssb",
-        "nssdev",
-        "nsspki",
-        "nssutil",
-        "pk11wrap_static",
-        "plc4",
-        "plds4",
-        "softokn_static",
-        "ssl",
-    ];
-    // macOS always dynamically links against the system sqlite library.
-    // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
-    if target_os == "macos" {
-        println!("cargo:rustc-link-lib=dylib=sqlite3");
-    } else {
-        static_libs.push("sqlite");
+/// The archives in `lib_dir`, by link name: `nss_static` for `libnss_static.a` or `nss_static.lib`.
+///
+/// On Windows this includes NSPR's import library, `nspr4.lib`, which is the one to link: even a
+/// `--static` NSS uses NSPR as a DLL there.
+fn installed_archives(lib_dir: &Path) -> HashSet<String> {
+    let Ok(entries) = fs::read_dir(lib_dir) else {
+        return HashSet::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|file| {
+            // MSVC has no `lib` prefix convention.
+            if let Some(name) = file.strip_suffix(".lib") {
+                return Some(name.to_owned());
+            }
+            let name = file.strip_suffix(".a")?;
+            Some(name.strip_prefix("lib").unwrap_or(name).to_owned())
+        })
+        .collect()
+}
+
+/// The `-l` names that the system's pkg-config gives for `module`; its `-L` paths are added.
+///
+/// For `build.sh --system-nspr`, which writes `Requires: nspr` but installs no `nspr.pc`.
+fn system_pkg_config_libs(module: &str) -> Option<Vec<String>> {
+    // The crate, unlike the binary, honours `PKG_CONFIG*` and won't use the host's when cross
+    // compiling.
+    let library = pkg_config::Config::new()
+        .statik(true)
+        .cargo_metadata(false)
+        .env_metadata(true)
+        .probe(module)
+        .ok()?;
+    for dir in &library.link_paths {
+        println!("cargo:rustc-link-search=native={}", dir.display());
     }
-    // Hardware specific libs.
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    if target_arch == "arm" || target_arch == "aarch64" {
-        static_libs.push("armv8_c_lib");
+    Some(library.libs)
+}
+
+/// The module names in a `Requires:` field, without version constraints.
+fn required_modules(field: &str) -> impl Iterator<Item = String> {
+    field.split(',').flat_map(|entry| {
+        entry
+            .split_once(['<', '>', '=', '!'])
+            .map_or(entry, |(names, _version)| names)
+            .split_whitespace()
+            .map(String::from)
+    })
+}
+
+/// The `-l` names in `<module>.pc`, then those of the modules it requires.
+///
+/// Parses just `Libs` and `Requires` (and `.private`), without expanding variables, which is
+/// enough for NSS's and NSPR's files; Windows and Android builds have no pkg-config to run.
+fn pkg_config_libs(pc_dir: &Path, module: &str, seen: &mut HashSet<String>) -> Option<Vec<String>> {
+    if !seen.insert(module.to_owned()) {
+        return Some(Vec::new());
     }
-    if target_arch == "arm" {
-        static_libs.push("ghash-aes-arm32-neon_c_lib");
-    }
-    if target_arch == "aarch64" {
-        static_libs.push("ghash-aes-aarch64_c_lib");
-        static_libs.push("aarch64-gcm-wrap_c_lib");
-    }
-    if target_arch == "x86_64" || target_arch == "x86" {
-        static_libs.push("ghash-aes-x86_c_lib");
-        static_libs.push("sha-x86_c_lib");
-    }
-    if target_arch == "x86_64" {
-        static_libs.push("hw-acc-crypto-avx");
-        static_libs.push("hw-acc-crypto-avx2");
-        static_libs.push("intel-gcm-wrap_c_lib");
-    }
-    // For libraries added in an NSS version greater than our minimum,
-    // check that they are present before linking them.
-    for libname in ["pqcwrap_static", "crux"] {
-        if [format!("{libname}.lib"), format!("lib{libname}.a")]
-            .iter()
-            .any(|f| libdir.join(f).is_file())
-        {
-            static_libs.push(libname);
+    let path = pc_dir.join(format!("{module}.pc"));
+    let text = fs::read_to_string(&path).ok()?;
+    println!("cargo:rerun-if-changed={}", path.display());
+
+    let mut libs = Vec::new();
+    let mut requires = Vec::new();
+    for line in text.lines() {
+        // `Name: value`; variable definitions match no field below.
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        match key.trim().to_ascii_lowercase().as_str() {
+            "libs" | "libs.private" => libs.extend(
+                value
+                    .split_whitespace()
+                    .filter_map(|flag| flag.strip_prefix("-l"))
+                    .map(String::from),
+            ),
+            "requires" | "requires.private" => requires.extend(required_modules(value)),
+            _ => {}
         }
     }
-    for lib in &static_libs {
-        println!("cargo:rustc-link-lib=static={lib}");
+    // Requirements link after the module that needs them.
+    for required in requires {
+        let Some(required_libs) =
+            pkg_config_libs(pc_dir, &required, seen).or_else(|| system_pkg_config_libs(&required))
+        else {
+            // The linker may still find it, e.g. a system NSPR.
+            println!(
+                "cargo:warning=no {}, required by {module}.pc, and pkg-config \
+                 could not supply it; linking without it",
+                pc_dir.join(format!("{required}.pc")).display()
+            );
+            continue;
+        };
+        libs.extend(required_libs);
     }
-    static_libs
+    Some(libs)
+}
+
+/// The libraries to link, in order, from the `nss-static.pc` that `build.sh --static` writes.
+fn pkg_config_static_libs(lib_dir: &Path) -> Option<Vec<String>> {
+    pkg_config_libs(
+        &lib_dir.join("pkgconfig"),
+        "nss-static",
+        &mut HashSet::new(),
+    )
+}
+
+fn static_link(lib_dir: &Path) -> Vec<String> {
+    let mut named = pkg_config_static_libs(lib_dir)
+        // An empty list is as useless as a missing file.
+        .filter(|libs| !libs.is_empty())
+        .unwrap_or_else(|| {
+            panic!(
+                "no libraries to link from {}; build NSS with `build.sh --static`, which writes it",
+                lib_dir.join("pkgconfig").join("nss-static.pc").display()
+            )
+        });
+    let archives = installed_archives(lib_dir);
+    // macOS uses the system's sqlite, which the .pc doesn't name.
+    // See https://github.com/nss-dev/nss/blob/a8c22d8fc0458db3e261acc5e19b436ab573a961/coreconf/Darwin.mk#L130-L135
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" {
+        named.push(String::from("sqlite3"));
+    }
+    for name in &named {
+        // Anything NSS didn't build comes from the system.
+        let kind = if archives.contains(name) {
+            "static"
+        } else {
+            "dylib"
+        };
+        println!("cargo:rustc-link-lib={kind}={name}");
+    }
+    named
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -412,6 +485,28 @@ impl ParseCallbacks for Pkcs11Types {
     }
 }
 
+/// The versioned `--target=` (e.g. `aarch64-linux-android23`) from the target's C flags.
+///
+/// NDK r30's headers reject the unversioned triple that bindgen derives from the Rust target, and
+/// cargo-ndk only passes the versioned one in the C flags.
+fn android_clang_target() -> Option<String> {
+    let target = env::var("TARGET").ok()?;
+    let vars = [
+        format!("CFLAGS_{target}"),
+        format!("CFLAGS_{}", target.replace('-', "_")),
+        String::from("TARGET_CFLAGS"),
+        String::from("CFLAGS"),
+    ];
+    vars.iter().find_map(|var| {
+        println!("cargo:rerun-if-env-changed={var}");
+        env::var(var)
+            .ok()?
+            .split_whitespace()
+            .find(|flag| flag.starts_with("--target="))
+            .map(String::from)
+    })
+}
+
 fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
     let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
@@ -441,6 +536,10 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         } else if target_os == "android" {
             builder = builder.clang_arg("-DLINUX");
             builder = builder.clang_arg("-DANDROID");
+            // bindgen adds its own --target only if none is given.
+            if let Some(clang_target) = android_clang_target() {
+                builder = builder.clang_arg(clang_target);
+            }
         }
         if bindings.cplusplus {
             builder = builder.clang_args(["-x", "c++", "-std=c++14"]);
@@ -678,6 +777,8 @@ fn main() {
     for var in [
         "NSS_DIR",
         "NSS_PREBUILT",
+        "PKG_CONFIG",
+        "PKG_CONFIG_ALLOW_CROSS",
         "PKG_CONFIG_PATH",
         "PKG_CONFIG_LIBDIR",
         "PKG_CONFIG_SYSROOT_DIR",
