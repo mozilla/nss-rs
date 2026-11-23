@@ -5,9 +5,10 @@
 // except according to those terms.
 
 use std::{
-    io::{Read as _, Write as _},
+    io::{ErrorKind, Read as _, Write as _},
     net::{TcpListener, TcpStream},
     process::{Child, Command},
+    thread,
     time::Duration,
 };
 
@@ -42,7 +43,26 @@ pub fn resume_in_fresh_process(token: &ResumptionToken) -> bool {
             .spawn()
             .expect("should start child"),
     );
-    let (mut stream, _) = listener.accept().expect("child should connect");
+    listener
+        .set_nonblocking(true)
+        .expect("should set nonblocking");
+    let mut stream = 'accept: {
+        for _ in 0..1000 {
+            match listener.accept() {
+                Ok((stream, _)) => break 'accept stream,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    assert!(
+                        child.0.try_wait().expect("child runs").is_none(),
+                        "child exited before connecting"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("accept failed: {e}"),
+            }
+        }
+        panic!("child did not connect");
+    };
+    stream.set_nonblocking(false).expect("should set blocking");
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .expect("should set timeout");
