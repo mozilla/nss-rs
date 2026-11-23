@@ -462,6 +462,22 @@ fn duplicate_copies_zero_rtt_settings() {
 }
 
 #[test]
+fn duplicate_drops_enabled_resumption() {
+    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
+
+    let mut client = Client::new("server.example", true).expect("should create client");
+    client
+        .enable_resumption(token)
+        .expect("should accept token");
+    let mut dup = client.duplicate().expect("should duplicate");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut dup, &mut server);
+
+    assert!(!dup.info().unwrap().resumed());
+    assert!(!server.info().unwrap().resumed());
+}
+
+#[test]
 fn duplicate_keeps_ech() {
     fixture_init();
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -528,6 +544,8 @@ fn ticket_expiration(client: &mut Client, t: Instant) -> Instant {
     let record = records.into_iter().next();
     let records = client.handshake_raw(t, record).expect("records ingested");
     assert!(records.is_empty());
+    let dup = client.duplicate().expect("should duplicate");
+    assert!(dup.resumption_tokens().is_empty());
     assert_eq!(client.resumption_tokens().len(), 1);
     client.resumption_token().expect("token").expiration_time()
 }
