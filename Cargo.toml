@@ -152,7 +152,7 @@ enum-map = { version = "2.7", default-features = false }
 log = { workspace = true }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = "2"
-zeroize = { version = "1", default-features = false, features = ["derive"] }
+zeroize = { version = "1", default-features = false, features = ["alloc", "derive"] }
 
 [dependencies.derive_more]
 version = "2"
