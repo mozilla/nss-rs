@@ -1301,7 +1301,7 @@ fn connection_fails_encoder_returned_too_long() {
 #[test]
 fn encoder_short_write_does_not_send_heap_contents() {
     thread_local! {
-        static RECEIVED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+        static RECEIVED: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     }
 
     struct CompressionEncoderShortWrite {}
