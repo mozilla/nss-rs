@@ -9,8 +9,10 @@ use nss_rs::{
 };
 
 mod handshake;
-#[path = "agent/resumption_process.rs"]
-mod resumption_process;
+mod agent {
+    pub mod resumption_process;
+}
+use agent::resumption_process;
 use test_fixture::{anti_replay, damage_ech_config, fixture_init, now};
 
 use crate::handshake::{connect, connect_fail, forward_records};

@@ -34,7 +34,7 @@ pub fn resume_in_fresh_process(token: &ResumptionToken) -> bool {
     let listener = TcpListener::bind("127.0.0.1:0").expect("should bind");
     let mut child = ClientProcess(
         Command::new(std::env::current_exe().expect("should find test binary"))
-            .args(["--exact", "resumption_process::resume_in_child"])
+            .args(["--exact", "agent::resumption_process::resume_in_child"])
             .env(
                 CHILD_ADDR,
                 listener.local_addr().expect("has address").to_string(),
