@@ -999,8 +999,8 @@ impl Debug for ResumptionToken {
 
 impl ResumptionToken {
     #[must_use]
-    pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
-        Self::new_with_early_data(TokenKind::Encrypted(token), expiration_time, 0)
+    pub const fn new(token: TokenKind, expiration_time: Instant) -> Self {
+        Self::new_with_early_data(token, expiration_time, 0)
     }
 
     #[must_use]
@@ -1565,7 +1565,7 @@ mod tests {
             215, 120, 60, 213, 142, 121, 11, 15, 251, 195, 120, 39, 17, 117, 183, 1, 90, 178, 149,
             74, 184, 51, 9, 38, 114, 144, 66, 153,
         ];
-        let resumption_token = ResumptionToken::new(token.to_vec(), now);
+        let resumption_token = ResumptionToken::new(TokenKind::Encrypted(token.to_vec()), now);
         let expected = format!(
             "ResumptionToken {{ token: Encrypted([848]: 0200063c2515eea5..b833092672904299), expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
