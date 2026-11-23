@@ -7,8 +7,8 @@ use std::{
 };
 
 use nss_rs::{
-    AntiReplay, AuthenticationStatus, Client, Error, Extension, Group, HandshakeState, Record, Res,
-    ResumptionToken, SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256,
+    AntiReplay, AuthenticationStatus, Client, Epoch, Error, Extension, Group, HandshakeState,
+    Record, Res, ResumptionToken, SecretAgentPreInfo, Server, TLS_AES_128_GCM_SHA256,
     TLS_ALERT_CERTIFICATE_REVOKED, TLS_ALERT_ECH_REQUIRED, TLS_ALERT_PROTOCOL_VERSION,
     TLS_CHACHA20_POLY1305_SHA256, TLS_EXT_SERVER_NAME, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519,
     TLS_SIG_ECDSA_SECP256R1_SHA256, TLS_VERSION_1_2, TLS_VERSION_1_3, ZeroRttCheckResult,
@@ -456,7 +456,15 @@ fn duplicate_copies_zero_rtt_settings() {
         .disable_end_of_early_data()
         .expect("should disable EOED");
 
-    connect(&mut dup, &mut server);
+    let records = dup.handshake_raw(now(), None).expect("send CH");
+    let records = forward_records(now(), &mut server, records).expect("read CH, send SH");
+    let records = forward_records(now(), &mut dup, records).expect("read SH, send CF");
+    let epochs: Vec<_> = records.iter().map(|r| r.epoch).collect();
+    assert_eq!(epochs, [Epoch::Handshake]);
+    let records = forward_records(now(), &mut server, records).expect("read CF");
+    assert!(records.is_empty());
+    assert!(dup.state().is_connected());
+    assert!(server.state().is_connected());
     assert!(dup.info().unwrap().early_data_accepted());
     assert!(server.info().unwrap().early_data_accepted());
 }
