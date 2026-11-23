@@ -236,7 +236,7 @@ jobs:
             install: dnf install -y git nss-devel clang-devel pkgconf-pkg-config gcc curl
           - name: openSUSE Tumbleweed
             # renovate: depName=opensuse/tumbleweed datasource=docker
-            container: opensuse/tumbleweed:latest@sha256:0afa1776a6caada91802c6866df7b09edabe248876baf79a1a99918b377ca08c
+            container: opensuse/tumbleweed:latest@sha256:3e4ba7f382638c643eb5805d959637d9a59ede4f640fe9407106493fc6ac9ede
             install: zypper install -y --no-recommends git mozilla-nss-devel clang-devel pkg-config gcc curl
           - name: Arch Linux
             # renovate: depName=archlinux datasource=docker
