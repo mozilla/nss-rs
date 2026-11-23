@@ -58,7 +58,7 @@ pub use self::{
     aead::{Mode, RecordProtection, RecordProtectionOps},
     agent::{
         Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken,
-        SecretAgent, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttCheckResult,
+        SecretAgent, SecretAgentInfo, SecretAgentPreInfo, Server, TokenKind, ZeroRttCheckResult,
         ZeroRttChecker,
     },
     auth::AuthenticationStatus,

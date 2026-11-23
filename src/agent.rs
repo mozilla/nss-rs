@@ -946,18 +946,27 @@ impl Display for SecretAgent {
     }
 }
 
-#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Zeroize)]
-enum TokenKind {
+/// A resumption token's bytes, by whether NSS exported the resumption secret in cleartext.
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Zeroize, ZeroizeOnDrop)]
+pub enum TokenKind {
     Plaintext(Vec<u8>),
     Encrypted(Vec<u8>),
 }
 
-#[derive(PartialOrd, Ord, PartialEq, Eq, Clone, ZeroizeOnDrop)]
+impl TokenKind {
+    const fn new(token: Vec<u8>, plaintext: bool) -> Self {
+        if plaintext {
+            Self::Plaintext(token)
+        } else {
+            Self::Encrypted(token)
+        }
+    }
+}
+
+#[derive(PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct ResumptionToken {
     token: TokenKind,
-    #[zeroize(skip)]
     expiration_time: Instant,
-    #[zeroize(skip)]
     max_early_data_size: u32,
 }
 
@@ -969,13 +978,21 @@ impl AsRef<[u8]> for ResumptionToken {
     }
 }
 
+impl Debug for TokenKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Plaintext(_) => f.write_str("Plaintext(content hidden)"),
+            Self::Encrypted(t) => write!(f, "Encrypted({})", hex_snip_middle(t)),
+        }
+    }
+}
+
 impl Debug for ResumptionToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResumptionToken")
-            .field("token", &hex_snip_middle(self.as_ref()))
+            .field("token", &self.token)
             .field("expiration_time", &self.expiration_time)
             .field("max_early_data_size", &self.max_early_data_size)
-            .field("is_plaintext", &self.is_plaintext())
             .finish()
     }
 }
@@ -983,22 +1000,17 @@ impl Debug for ResumptionToken {
 impl ResumptionToken {
     #[must_use]
     pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
-        Self::new_with_early_data(token, expiration_time, 0, false)
+        Self::new_with_early_data(TokenKind::Encrypted(token), expiration_time, 0)
     }
 
     #[must_use]
     pub const fn new_with_early_data(
-        token: Vec<u8>,
+        token: TokenKind,
         expiration_time: Instant,
         max_early_data_size: u32,
-        plaintext: bool,
     ) -> Self {
         Self {
-            token: if plaintext {
-                TokenKind::Plaintext(token)
-            } else {
-                TokenKind::Encrypted(token)
-            },
+            token,
             expiration_time,
             max_early_data_size,
         }
@@ -1090,14 +1102,14 @@ impl Client {
         };
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(unsafe { null_safe_slice(token, len) });
-        debug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
+        let kind = TokenKind::new(v, plaintext);
+        debug!("[{fd:p}] Got resumption token {kind:?}");
 
         if let Ok(t) = Time::try_from(expiration_time) {
             resumption.push(ResumptionToken::new_with_early_data(
-                v,
+                kind,
                 *t,
                 max_early_data_size,
-                plaintext,
             ));
         }
         ssl::SECSuccess
@@ -1495,7 +1507,7 @@ impl DerefMut for Agent {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::ResumptionToken;
+    use crate::{ResumptionToken, TokenKind};
 
     #[test]
     fn resumption_token_debug_impl() {
@@ -1545,7 +1557,18 @@ mod tests {
         ];
         let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
-            "ResumptionToken {{ token: \"[848]: 0200063c2515eea5..b833092672904299\", expiration_time: {now:?}, max_early_data_size: 0, is_plaintext: false }}"
+            "ResumptionToken {{ token: Encrypted([848]: 0200063c2515eea5..b833092672904299), expiration_time: {now:?}, max_early_data_size: 0 }}"
+        );
+        assert_eq!(format!("{resumption_token:?}"), expected);
+    }
+
+    #[test]
+    fn resumption_token_debug_hides_plaintext() {
+        let now = test_fixture::now();
+        let resumption_token =
+            ResumptionToken::new_with_early_data(TokenKind::Plaintext(vec![0xab; 32]), now, 0);
+        let expected = format!(
+            "ResumptionToken {{ token: Plaintext(content hidden), expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
     }
