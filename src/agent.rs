@@ -1034,6 +1034,16 @@ impl ResumptionToken {
     pub const fn is_plaintext(&self) -> bool {
         matches!(self.token, TokenKind::Plaintext(_))
     }
+
+    /// A token with the same kind, expiration time and early data limit, with `token` as its bytes.
+    #[must_use]
+    pub const fn clone_with_bytes(&self, token: Vec<u8>) -> Self {
+        Self::new_with_early_data(
+            TokenKind::new(token, self.is_plaintext()),
+            self.expiration_time,
+            self.max_early_data_size,
+        )
+    }
 }
 
 /// A TLS Client.
@@ -1571,5 +1581,18 @@ mod tests {
             "ResumptionToken {{ token: Plaintext(content hidden), expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
         assert_eq!(format!("{resumption_token:?}"), expected);
+    }
+
+    #[test]
+    fn resumption_token_clone_with_bytes_keeps_kind() {
+        let now = test_fixture::now();
+        for kind in [TokenKind::Plaintext(vec![1]), TokenKind::Encrypted(vec![1])] {
+            let token = ResumptionToken::new_with_early_data(kind, now, 7);
+            let rewrapped = token.clone_with_bytes(vec![2, 3]);
+            assert_eq!(rewrapped.is_plaintext(), token.is_plaintext());
+            assert_eq!(rewrapped.as_ref(), &[2, 3]);
+            assert_eq!(rewrapped.expiration_time(), now);
+            assert_eq!(rewrapped.max_early_data_size(), 7);
+        }
     }
 }
