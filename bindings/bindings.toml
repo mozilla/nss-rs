@@ -209,6 +209,7 @@ functions = [
   "PK11_ReferenceSymKey",
   "PK11_SetSymKeyNickname",
   "PK11_SignWithMechanism",
+  "PK11_SignatureLen",
   "PK11_TokenKeyGenWithFlags",
   "PK11_VerifyWithMechanism",
   "PK11_WrapPrivKey",
