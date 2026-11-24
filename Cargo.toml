@@ -152,7 +152,7 @@ enum-map = { version = "2.7", default-features = false }
 log = { workspace = true }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = "2"
-zeroize = { version = "1", default-features = false, features = ["derive"], optional = true }
+zeroize = { version = "1", default-features = false, features = ["alloc", "derive"] }
 
 [dependencies.derive_more]
 version = "2"
@@ -185,7 +185,7 @@ default = []
 bench = ["log/release_max_level_info"]
 # Bypass PKCS#11 session layer for RecordProtection AEAD operations by calling
 # freebl directly. Improves performance but skips softoken's FIPS self-test gate.
-blapi = ["dep:zeroize"]
+blapi = []
 disable-encryption = []
 disable-random = []
 gecko = ["mozbuild"]
