@@ -1125,12 +1125,12 @@ impl Client {
         };
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(unsafe { null_safe_slice(token, len) });
-        let kind = TokenKind::new(v, plaintext);
-        debug!("[{fd:p}] Got resumption token {kind:?}");
+        let token = TokenKind::new(v, plaintext);
+        debug!("[{fd:p}] Got resumption token {token:?}");
 
         if let Ok(t) = Time::try_from(expiration_time) {
             resumption.push(ResumptionToken::new_with_kind_and_early_data(
-                kind,
+                token,
                 *t,
                 max_early_data_size,
             ));
