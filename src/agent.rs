@@ -999,12 +999,25 @@ impl Debug for ResumptionToken {
 
 impl ResumptionToken {
     #[must_use]
-    pub const fn new(token: TokenKind, expiration_time: Instant) -> Self {
+    pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
         Self::new_with_early_data(token, expiration_time, 0)
     }
 
     #[must_use]
     pub const fn new_with_early_data(
+        token: Vec<u8>,
+        expiration_time: Instant,
+        max_early_data_size: u32,
+    ) -> Self {
+        Self::new_with_kind_and_early_data(
+            TokenKind::Encrypted(token),
+            expiration_time,
+            max_early_data_size,
+        )
+    }
+
+    #[must_use]
+    pub const fn new_with_kind_and_early_data(
         token: TokenKind,
         expiration_time: Instant,
         max_early_data_size: u32,
@@ -1038,7 +1051,7 @@ impl ResumptionToken {
     /// A token with the same kind, expiration time and early data limit, with `token` as its bytes.
     #[must_use]
     pub const fn clone_with_bytes(&self, token: Vec<u8>) -> Self {
-        Self::new_with_early_data(
+        Self::new_with_kind_and_early_data(
             TokenKind::new(token, self.is_plaintext()),
             self.expiration_time,
             self.max_early_data_size,
@@ -1116,7 +1129,7 @@ impl Client {
         debug!("[{fd:p}] Got resumption token {kind:?}");
 
         if let Ok(t) = Time::try_from(expiration_time) {
-            resumption.push(ResumptionToken::new_with_early_data(
+            resumption.push(ResumptionToken::new_with_kind_and_early_data(
                 kind,
                 *t,
                 max_early_data_size,
@@ -1565,7 +1578,7 @@ mod tests {
             215, 120, 60, 213, 142, 121, 11, 15, 251, 195, 120, 39, 17, 117, 183, 1, 90, 178, 149,
             74, 184, 51, 9, 38, 114, 144, 66, 153,
         ];
-        let resumption_token = ResumptionToken::new(TokenKind::Encrypted(token.to_vec()), now);
+        let resumption_token = ResumptionToken::new(token.to_vec(), now);
         let expected = format!(
             "ResumptionToken {{ token: Encrypted([848]: 0200063c2515eea5..b833092672904299), expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
@@ -1575,8 +1588,11 @@ mod tests {
     #[test]
     fn resumption_token_debug_hides_plaintext() {
         let now = test_fixture::now();
-        let resumption_token =
-            ResumptionToken::new_with_early_data(TokenKind::Plaintext(vec![0xab; 32]), now, 0);
+        let resumption_token = ResumptionToken::new_with_kind_and_early_data(
+            TokenKind::Plaintext(vec![0xab; 32]),
+            now,
+            0,
+        );
         let expected = format!(
             "ResumptionToken {{ token: Plaintext(content hidden), expiration_time: {now:?}, max_early_data_size: 0 }}"
         );
@@ -1584,10 +1600,22 @@ mod tests {
     }
 
     #[test]
+    fn resumption_token_new_with_early_data_preserves_wrapped_bytes() {
+        let now = test_fixture::now();
+        let bytes = [1, 2, 3];
+        let token = ResumptionToken::new_with_early_data(bytes.to_vec(), now, 7);
+
+        assert!(!token.is_plaintext());
+        assert_eq!(token.as_ref(), &bytes);
+        assert_eq!(token.expiration_time(), now);
+        assert_eq!(token.max_early_data_size(), 7);
+    }
+
+    #[test]
     fn resumption_token_clone_with_bytes_keeps_kind() {
         let now = test_fixture::now();
         for kind in [TokenKind::Plaintext(vec![1]), TokenKind::Encrypted(vec![1])] {
-            let token = ResumptionToken::new_with_early_data(kind, now, 7);
+            let token = ResumptionToken::new_with_kind_and_early_data(kind, now, 7);
             let rewrapped = token.clone_with_bytes(vec![2, 3]);
             assert_eq!(rewrapped.is_plaintext(), token.is_plaintext());
             assert_eq!(rewrapped.as_ref(), &[2, 3]);
