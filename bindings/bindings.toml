@@ -48,6 +48,7 @@ functions = [
   "SSL_GetNextProto",
   "SSL_GetNumImplementedCiphers",
   "SSL_GetPreliminaryChannelInfo",
+  "SSL_HandshakeCallback",
   "SSL_ImportFD",
   "SSL_NamedGroupConfig",
   "SSL_OptionGetDefault",
